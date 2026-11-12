@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "matsim"
+version = "0.1.0"
+description = "Team A: Transportlosgrößen und Materialversorgung in der IoT Factory (SimPy)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "simpy>=4.1",
+  "pandas>=2.2",
+  "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+# Live-Lesezugriff auf die MES-Datenbank im Labornetz (nur lesend).
+live = ["mariadb>=1.1"]
+dev = ["pytest>=8", "ruff>=0.6"]
+notebooks = ["jupyterlab", "matplotlib"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+  "dumps: Test benötigt die lokalen MES-Dumps in data/raw/mes_snapshots/",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+# Zeilenlänge regelt der Formatter; lange Docstring-Zeilen sind kein Fehler.
+ignore = ["E501"]

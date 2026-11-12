@@ -1,0 +1,96 @@
+# Anlagenbeschreibung für die Simulation (Schnittstelle AP1 -> AP3).
+#
+# Jeder Parameter hat die Form {wert, herkunft, beleg}.
+#   herkunft: mes        = direkt aus einer MES-Tabelle gelesen
+#             abgeleitet = aus MES-Daten berechnet (Filter siehe docs/projekt/datenmodell-mes.md)
+#             annahme    = Szenario- oder Modellannahme (docs/projekt/annahmen-und-datenluecken.md)
+#             offen      = noch nicht belegbar; wert ist null, die Simulation darf ihn nicht nutzen
+# Zeiten in Sekunden. Stand der MES-Werte: Snapshot 2026-11-09 15:57.
+schema_version: 1
+zeiteinheit: s
+
+teile:
+  800: IoT main PCB
+  811: IoT gyroscope
+  812: IoT weatherstation
+  813: IoT analog PCB
+  814: IoT Display
+  831: IoT front bk
+  832: IoT front blue
+  833: IoT front red
+  834: IoT front grey
+
+box:
+  typ_pno: {wert: 29, herkunft: mes, beleg: "tblboxdef.BoxPNo"}
+  positionen: {wert: 8, herkunft: mes, beleg: "tblboxdef.PosCount = 8, RowCount = 4"}
+  anzahl_stammdaten: {wert: 40, herkunft: mes, beleg: "tblboxdef.Count; tblbox hat 40 Zeilen"}
+  anzahl_verortet: {wert: 21, herkunft: abgeleitet, beleg: "distinct tblbufferpos.BoxID > 0, in allen 6 Snapshots 21 (B-09)"}
+  transportboxen_frei:
+    wert: 7
+    herkunft: abgeleitet
+    beleg: "leere verortete Boxen im Snapshot 15:57 ohne Box 38 am AASS1-Cache; als Boxbestand zu bestätigen (A-03)"
+
+materiallager:
+  resource_id: {wert: 17, herkunft: mes, beleg: "tblresource: CP-F-ASRS20-B, tblbuffer 17/1 Storage 4x5"}
+  lagerplaetze: {wert: 20, herkunft: mes, beleg: "tblbufferpos ResourceId 17, BufNo 1: 20 Zeilen"}
+  # Anfangsbestand je Teil: nur Teile in verorteten Boxen (B-10). Snapshot 15:57, alles frei.
+  anfangsbestand:
+    800: {wert: 4, herkunft: abgeleitet, beleg: "tblboxpos in verorteten Boxen; weitere 5 in nicht verorteten Boxen"}
+    811: {wert: 5, herkunft: abgeleitet, beleg: "tblboxpos in verorteten Boxen"}
+    812: {wert: 9, herkunft: abgeleitet, beleg: "tblboxpos in verorteten Boxen"}
+    813: {wert: 5, herkunft: abgeleitet, beleg: "tblboxpos in verorteten Boxen"}
+    814: {wert: 4, herkunft: abgeleitet, beleg: "tblboxpos in verorteten Boxen; weitere 9 in nicht verorteten Boxen"}
+    831: {wert: 5, herkunft: abgeleitet, beleg: "tblboxpos in verorteten Boxen"}
+    832: {wert: 8, herkunft: abgeleitet, beleg: "tblboxpos in verorteten Boxen; 1 weiteres in nicht verorteter Box"}
+    833: {wert: 7, herkunft: abgeleitet, beleg: "tblboxpos in verorteten Boxen"}
+    834: {wert: 9, herkunft: abgeleitet, beleg: "tblboxpos in verorteten Boxen"}
+
+kommissionierplatz:
+  resource_id: {wert: 19, herkunft: mes, beleg: "tblresource: CP-PICKSORT"}
+  gleichzeitige_chargen: {wert: 1, herkunft: annahme, beleg: "A-04: am 09.11.2026 liefen die Kommissionieraufträge nacheinander"}
+  pickzeit_je_teil_s: {wert: 23, herkunft: abgeleitet, beleg: "Median OpNo 220 an Ressource 19, n = 748, q10/q90 = 21/25 s (B-13)"}
+  pickzeit_stammdaten_s: {wert: 20, herkunft: mes, beleg: "tblresourceoperation 19/220 WorkingTime"}
+
+fahrzeuge:
+  anzahl_stammdaten: {wert: 6, herkunft: mes, beleg: "tblresource 20-25 LOG-MR-B"}
+  anzahl: {wert: 2, herkunft: annahme, beleg: "A-05: am Nachmittag des 09.11.2026 meldeten nur die Ressourcen 24 und 25 (tblmachinereport)"}
+  boxplaetze_je_fahrzeug: {wert: 1, herkunft: mes, beleg: "tblbuffer 20-25: storage 1x1"}
+  hintransport_s:
+    wert: 130
+    herkunft: abgeleitet
+    beleg: "Median Ende letzter Pick bis Ende erster OpNo 215, n = 229; enthält Wartezeiten, keine reine Fahrzeit (B-14, L-03)"
+  leerboxruecktransport_s: {wert: null, herkunft: offen, beleg: "L-03: Robotino-Fahrten stehen nicht in tblfinstep"}
+
+stationen:
+  RASS1:
+    resource_id: {wert: 2, herkunft: mes, beleg: "tblresource: CP-F-RASS-1"}
+    uebergabeplaetze: {wert: 2, herkunft: mes, beleg: "tblbuffer 2/1 Box 1x2; tblbufferpos 2 Zeilen"}
+    materialsatz:
+      800: {wert: 1, herkunft: mes, beleg: "tblstepdef 1000/30 OpNo 323, Parameter 3 = 800"}
+      814: {wert: 1, herkunft: mes, beleg: "tblstepdef 1000/60 OpNo 323, Parameter 3 = 814"}
+    zulaessige_teile: {wert: [800, 814], herkunft: mes, beleg: "tblpnogroup 5 'RASS1 material'; Auswahlliste WPNo 1, Schritt 10, Parameter 11"}
+    montagezeit_je_teil_s: {wert: 37, herkunft: abgeleitet, beleg: "Median OpNo 323 an Ressource 2, n = 236"}
+  RASS2:
+    resource_id: {wert: 4, herkunft: mes, beleg: "tblresource: CP-F-RASS-2"}
+    uebergabeplaetze: {wert: 2, herkunft: mes, beleg: "tblbuffer 4/1 Box 1x2"}
+    materialsatz:
+      813: {wert: 1, herkunft: mes, beleg: "tblstepdef 1000/100 OpNo 324, Parameter 4 = 813"}
+      811: {wert: 1, herkunft: mes, beleg: "tblstepdef 1000/110 OpNo 324, Parameter 4 = 811"}
+    zulaessige_teile: {wert: [811, 812, 813], herkunft: mes, beleg: "tblpnogroup 6 'RASS2 material'; Auswahlliste WPNo 2"}
+    montagezeit_je_teil_s: {wert: 39, herkunft: abgeleitet, beleg: "Median OpNo 324 an Ressource 4, n = 213"}
+  RASS3:
+    resource_id: {wert: 6, herkunft: mes, beleg: "tblresource: CP-F-RASS-3"}
+    uebergabeplaetze: {wert: 2, herkunft: mes, beleg: "tblbuffer 6/1 Box 1x2"}
+    materialsatz:
+      831: {wert: 1, herkunft: mes, beleg: "tblstepdef 1000/160 OpNo 325, Parameter 3 = 831"}
+    zulaessige_teile: {wert: [831, 832, 833, 834], herkunft: mes, beleg: "tblpnogroup 12 'RASS3 material'; Auswahlliste WPNo 3"}
+    montagezeit_je_teil_s: {wert: 24, herkunft: abgeleitet, beleg: "Median OpNo 325 an Ressource 6, n = 123"}
+
+werkstueckumlauf:
+  # Bandtopologie laut tbltopology: Stationsfolge der inneren Schleife.
+  schleife: {wert: [10, 11, 12, 13, 2, 3, 4, 5, 6, 7], herkunft: mes, beleg: "tbltopology: 10->11->12->13->2->3->4->5->6->7->10"}
+  auslagern_s: {wert: 16, herkunft: abgeleitet, beleg: "Median OpNo 212 an Ressource 1, n = 132"}
+  einlagern_s: {wert: 15, herkunft: abgeleitet, beleg: "Median OpNo 211 an Ressource 1, n = 145"}
+  weiterfahrt_bei_materialmangel: {wert: true, herkunft: annahme, beleg: "A-01: Aufgabenstellung Team C 'Fehlt Material, fährt das Werkstück weiter'; Referenzpaket fehlt"}
+  umlaufzeit_s: {wert: null, herkunft: offen, beleg: "L-02: Bandlaufzeiten sind in den MES-Daten nicht aufgezeichnet"}
+  wiederkehrregel: {wert: null, herkunft: offen, beleg: "L-01: legt das Referenzpaket fest"}

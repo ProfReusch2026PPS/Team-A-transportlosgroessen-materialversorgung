@@ -1,0 +1,24 @@
+# Szenario "kalibrierung" (Schnittstelle AP5 -> AP3). Schema: docs/projekt/versuchsplan.md.
+# ENTWURF: Alle Zahlenwerte sind Szenarioannahmen und von AP5 festzulegen und zu begründen.
+schema_version: 1
+name: kalibrierung
+beschreibung: "Parameterwahl für V2 bis V4; getrennt von den Abschluss-Szenarien"
+zweck: parameterwahl
+laufzeit:
+  max_laufzeit_s: 14400
+  einschwingphase_s: 0
+  endkriterium: alle_anforderungen_abgeschlossen_oder_max_laufzeit
+replikationen:
+  anzahl: 1
+  seeds: [101]
+bedarf:
+  muster: gleichmaessig
+  produkte: 12
+  zwischenankunft_s: 240
+zeiten:
+  modus: fest
+anlage_abweichungen: {}
+verfahren: [V0, V1, V2, V3, V4]
+verfahren_parameter:
+  V2: {fuellschwelle_positionen: 8}
+  V3: {max_wartezeit_s: 300}

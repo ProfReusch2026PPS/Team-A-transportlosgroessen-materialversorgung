@@ -1,0 +1,26 @@
+# Szenario "unsicherheit" (Schnittstelle AP5 -> AP3). Schema: docs/projekt/versuchsplan.md.
+# ENTWURF: Alle Zahlenwerte sind Szenarioannahmen und von AP5 festzulegen und zu begründen.
+schema_version: 1
+name: unsicherheit
+beschreibung: "Sensitivität: Kommissionier- und Transportzeit als Verteilung statt Festwert"
+zweck: abschlusspruefung
+laufzeit:
+  max_laufzeit_s: 14400
+  einschwingphase_s: 0
+  endkriterium: alle_anforderungen_abgeschlossen_oder_max_laufzeit
+replikationen:
+  anzahl: 10
+  seeds: [11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+bedarf:
+  muster: gleichmaessig
+  produkte: 12
+  zwischenankunft_s: 240
+zeiten:
+  modus: verteilung
+  # Verteilungen leitet AP1 aus tblfinstep ab (matsim.daten.zeiten.zeitverteilung).
+  verteilt: [kommissionierplatz.pickzeit_je_teil_s, fahrzeuge.hintransport_s]
+anlage_abweichungen: {}
+verfahren: [V0, V1, V2, V3, V4]
+verfahren_parameter:
+  V2: {fuellschwelle_positionen: 8}
+  V3: {max_wartezeit_s: 300}

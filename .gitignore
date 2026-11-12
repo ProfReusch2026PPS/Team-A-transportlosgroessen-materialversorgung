@@ -72,6 +72,9 @@ instance/
 # Sphinx documentation
 docs/_build/
 
+# Project documentation is kept local and must not be pushed
+docs/
+
 # PyBuilder
 .pybuilder/
 target/
@@ -149,8 +152,9 @@ activemq-data/
 # SageMath parsed files
 *.sage.py
 
-# Environments
-.env
+# Environments and local credentials
+.env*
+!.env.example
 .envrc
 .venv
 env/
@@ -158,6 +162,17 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+*.pem
+*.key
+*.crt
+*.cer
+*.p12
+*.pfx
+*.jks
+secrets/
+credentials/
+**/secrets/
+**/credentials/
 
 # Spyder project settings
 .spyderproject
@@ -218,3 +233,41 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ---------------------------------------------------------------------------
+# Projekt Team A: Transportlosgrößen und Materialversorgung
+# ---------------------------------------------------------------------------
+
+# Zugangsdaten: nie versionieren
+db_connection_example_python.txt
+db_connection*.txt
+
+# MES-Dumps und daraus erzeugte Datenbanken bleiben lokal
+*.sql
+*.sqlite
+*.sqlite3
+*.db
+data/raw/mes_snapshots/*
+!data/raw/mes_snapshots/README.md
+!data/raw/mes_snapshots/Readme_Dozent.md
+data/interim/*
+!data/interim/README.md
+
+# Laufergebnisse
+results/*
+!results/README.md
+
+# Volltexte und Office-Dateien (Konvention der Lehrunterlagen)
+*.pdf
+*.ppt
+*.pptx
+*.doc
+*.docx
+*.xls
+*.xlsx
+*.zip
+
+# Betriebssystem
+.DS_Store
+Thumbs.db
+desktop.ini
