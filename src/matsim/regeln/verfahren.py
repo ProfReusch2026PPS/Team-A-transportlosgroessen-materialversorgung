@@ -1,11 +1,50 @@
-"""Planungsverfahren V0 bis V4 (AP4). Gerüst: Schnittstelle und Parameter, keine Logik.
+"""Planungsverfahren V0 bis V4 (AP4).
 
+Stand: V1 umgesetzt; V0, V2, V3 und V4 sind Gerüst.
 Steckbriefe und Begründungen: docs/projekt/planungsverfahren.md.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
+from matsim.modell.typen import Anforderung
 from matsim.regeln.basis import Anlass, Chargenentscheidung, Planungsverfahren, Planungszustand
+
+
+def _in_eingangsfolge(anforderungen: tuple[Anforderung, ...]) -> list[Anforderung]:
+    """Sortiert nach Eingangszeit; bei gleicher Zeit entscheidet die kleinere Identität.
+
+    Die Gleichstandsregel folgt docs/projekt/logikstruktur.md, Abschnitt „Gleichzeitige
+    Ereignisse“.
+    """
+    return sorted(anforderungen, key=lambda anforderung: (anforderung.eingang_s, anforderung.id))
+
+
+def _satz_zulaessig(anforderung: Anforderung, zustand: Planungszustand) -> bool:
+    """Prüft, ob der Satz für sich allein überhaupt eine zulässige Charge bilden kann.
+
+    Dieselben Bedingungen wie ``pruefe_charge``: Satz passt in eine Box, alle Teile sind für
+    die Station zulässig, jede Menge ist positiv.
+    """
+    satz = anforderung.satz
+    erlaubt = zustand.zulaessige_teile.get(anforderung.station, frozenset())
+    return (
+        satz.station == anforderung.station
+        and 0 < satz.positionen <= zustand.box_positionen
+        and all(menge > 0 and pno in erlaubt for pno, menge in satz.komponenten)
+    )
+
+
+def _bestand_reicht(anforderung: Anforderung, bestand: Mapping[int, int]) -> bool:
+    """Reicht der noch freie, nicht reservierte Bestand für den vollständigen Satz?"""
+    return all(bestand.get(pno, 0) >= menge for pno, menge in anforderung.satz.komponenten)
+
+
+def _bestand_abziehen(anforderung: Anforderung, bestand: dict[int, int]) -> None:
+    """Zieht den Satz vom lokal mitgeführten Bestand ab (keine Doppelvergabe im selben Aufruf)."""
+    for pno, menge in anforderung.satz.komponenten:
+        bestand[pno] -= menge
 
 
 class V0Referenz(Planungsverfahren):
@@ -25,15 +64,54 @@ class V0Referenz(Planungsverfahren):
 
 
 class V1Einzelversorgung(Planungsverfahren):
-    """Jeder vollständige Satz frühestmöglich in eigener Box."""
+    """Jeder vollständige Satz frühestmöglich in eigener Box (Lot-for-Lot in Eingangsfolge).
+
+    Regel je Planungsaufruf:
+
+    1. Offene Anforderungen in Eingangsfolge durchgehen (Gleichstand: kleinere Identität).
+    2. Je Satz genau eine Charge mit sofortigem Versand (``versand_fruehestens_s = zeit_s``),
+       solange eine freie Box vorhanden ist und der freie Bestand den vollständigen Satz deckt.
+    3. Reicht der Bestand für einen Satz nicht, wird er übersprungen; spätere Sätze, deren
+       Bestand reicht, werden trotzdem versorgt (keine Blockade durch einen Fehlteilsatz).
+    4. Sätze, die für sich allein keine zulässige Charge bilden können (zu groß für die Box,
+       stationsfremde Teile), werden nie gebunden. Die Simulation weist sie als Restbedarf aus.
+
+    Der Anlass ändert die Regel nicht: V1 bindet bei jedem Aufruf alles, was möglich ist.
+    Kommissionierplatz, Fahrzeug und Übergabeplatz begrenzen V1 nicht; das Warten darauf
+    bildet die Simulation ab (Warteursachen im Ereignisprotokoll). Parameter: keine.
+    """
 
     name = "V1"
 
     def entscheide(self, zustand: Planungszustand, anlass: Anlass) -> list[Chargenentscheidung]:
-        raise NotImplementedError("AP4: V1 Einzelversorgung")
+        bestand = dict(zustand.freier_bestand)
+        freie_boxen = zustand.freie_boxen
+        chargen: list[Chargenentscheidung] = []
+        for anforderung in _in_eingangsfolge(zustand.offene_anforderungen):
+            if freie_boxen <= 0:
+                break
+            if not _satz_zulaessig(anforderung, zustand):
+                continue
+            if not _bestand_reicht(anforderung, bestand):
+                continue
+            _bestand_abziehen(anforderung, bestand)
+            freie_boxen -= 1
+            chargen.append(
+                Chargenentscheidung(
+                    station=anforderung.station,
+                    anforderung_ids=(anforderung.id,),
+                    versand_fruehestens_s=zustand.zeit_s,
+                )
+            )
+        return chargen
 
     def naechste_wartefrist(self, zustand: Planungszustand) -> float | None:
-        raise NotImplementedError("AP4: V1 Einzelversorgung")
+        """V1 wartet nie bewusst. Bleibt ein Satz offen, fehlt eine Box oder Bestand.
+
+        Eine frei werdende Box löst den Anlass „Kapazität frei“ aus; eine Frist würde
+        nichts ändern.
+        """
+        return None
 
 
 class V2Fuellschwelle(Planungsverfahren):
