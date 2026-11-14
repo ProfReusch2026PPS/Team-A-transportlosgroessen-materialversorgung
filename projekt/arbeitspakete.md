@@ -7,7 +7,7 @@ Fünf Pakete für fünf Personen. Jedes Paket hat eigene Ordner; niemand ändert
 | AP1 Daten und MES-Modell | TODO: Name | TODO: Name |
 | AP2 Methodik und Literatur | TODO: Name | TODO: Name |
 | AP3 Simulationskern | TODO: Name | TODO: Name |
-| AP4 Planungsverfahren | TODO: Name | TODO: Name |
+| AP4 Planungsverfahren | Luis Kruse | TODO: Name |
 | AP5 Experimente und Auswertung | TODO: Name | TODO: Name |
 
 ## Schnittstellen
