@@ -266,6 +266,7 @@ results/*
 *.xls
 *.xlsx
 *.zip
+!/praesentation/*.pptx
 
 # Betriebssystem
 .DS_Store
