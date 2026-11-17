@@ -154,6 +154,14 @@ Regeln der Schnittstelle:
 - Die Simulation prüft jede Entscheidung mit `pruefe_charge` und gegen den Bestand. Eine unzulässige Entscheidung ist ein Fehler des Verfahrens und bricht den Lauf ab.
 - Erweiterungen des Zustands laufen über das Feld `zusatz` und werden hier dokumentiert, bevor ein Verfahren sie nutzt.
 
+Vereinbarte Schlüssel in `zusatz`:
+
+| Schlüssel | Typ | Bedeutung | Gelesen von | Pflicht für die Simulation |
+|---|---|---|---|---|
+| `chargen_in_versorgung` | `int`, mindestens 0 | Anzahl gebundener Chargen, deren Box noch nicht am Übergabeplatz abgeliefert ist (vom Ereignis `charge_gebunden` bis `lieferung`) | V0 | ja, in jedem Planungsaufruf; fehlt der Schlüssel, bricht V0 mit `ValueError` ab |
+
+Zu `chargen_in_versorgung`: Die Lieferung verringert den Wert. Der Planungsaufruf, der auf die Lieferung folgt, muss den bereits verringerten Wert sehen. Ausgelöst wird er durch die Freigabe des Fahrzeugs nach der Lieferung (Anlass „Kapazität frei“). Das folgt aus der Regel für gleichzeitige Ereignisse (Planungsaufrufe zuletzt). Ohne diesen Aufruf bliebe Restbedarf unter V0 liegen, weil V0 keine Wartefrist anmeldet. Die Konstante steht als `CHARGEN_IN_VERSORGUNG` in `matsim.regeln.verfahren`.
+
 ## 5. Verifikation und Validierung
 
 Die Lehrunterlagen grenzen Simulation als eigenes Modul ab ([Kapitel 00](../00-uebersicht-und-modulzuschnitt.md), Abschnitt „Abgrenzung zu anderen Modulen“). Deshalb wird das Vorgehen hier festgelegt; Quellen dazu stehen in [literatur-ergaenzung.md](literatur-ergaenzung.md).

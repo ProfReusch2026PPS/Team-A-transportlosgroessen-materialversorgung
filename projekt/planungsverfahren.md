@@ -40,11 +40,21 @@ Schema nach [Kapitel 13](../13-hannoveraner-lieferkettenmodell-und-logistische-z
 | Aufgabe | den Ablauf vom 09.11.2026 nachbilden, um das Modell zu validieren |
 | Eingaben | offene Sätze je Station, freie Box |
 | Ergebnis | je Station eine Charge mit allen offenen Sätzen; nächste Station erst nach Ablieferung der vorherigen Box |
-| Verfahren | feste Stationsfolge RASS1, RASS2, RASS3 |
+| Verfahren | feste Stationsfolge RASS1, RASS2, RASS3, zyklisch |
 | Zielkonflikt | wenige Transporte, aber spätere Stationen warten lange (erste Montage RASS3 rund 36 Minuten nach dem Auslagern) |
 | Rückkopplung | Abweichung der simulierten von den beobachteten Zeitpunkten |
 
-Offen: Was das MES tut, wenn mehr als 8 Positionen offen sind, ist aus einem Ablauf mit drei Produkten nicht ableitbar. Die historischen Auftragsgrößen enden bei 8 Positionen (B-15).
+Umgesetzte Regel (`V0Referenz` in `src/matsim/regeln/verfahren.py`), je Planungsaufruf:
+
+1. Warten, solange eine gebundene Charge noch nicht abgeliefert ist (`zusatz["chargen_in_versorgung"] > 0`, siehe [logikstruktur.md](logikstruktur.md), Abschnitt 4) oder keine Box frei ist.
+2. Sonst die Stationen zyklisch durchsuchen, beginnend bei der Station nach der zuletzt bedienten. Bedient wird die erste Station mit mindestens einem versorgbaren Satz.
+3. Die Box mit den offenen Sätzen dieser Station in Eingangsfolge füllen, solange Boxpositionen und freier Bestand den vollständigen Satz decken. Ein Satz ohne Bestand wird übersprungen.
+4. Passen nicht alle Sätze in die Box, bleibt der Rest offen und kommt in der nächsten Runde an die Reihe (A-09).
+5. Höchstens eine Charge je Aufruf, Versand sofort. V0 meldet keine Wartefrist an.
+
+Parameter: `stationsfolge` (optional; ohne Angabe RASS1, RASS2, RASS3). Am Referenzfall mit je drei Sätzen je Station ergibt die Regel drei Chargen in der beobachteten Folge (Test `test_ablauf_09_11_je_station_eine_box_nacheinander`).
+
+Was das MES tut, wenn mehr als 8 Positionen offen sind, ist aus einem Ablauf mit drei Produkten nicht ableitbar. Die historischen Auftragsgrößen enden bei 8 Positionen (B-15). Diese Lücke schließt die Annahme A-09; ebenso ist die Wiederaufnahme bei RASS1 nach RASS3 nicht beobachtet.
 
 ### V1 Einzelversorgung
 

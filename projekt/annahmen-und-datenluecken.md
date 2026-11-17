@@ -29,6 +29,7 @@ Verantwortlich: AP2 (Katalog), Inhalte von allen Paketen. Jede Annahme wird hier
 | A-06 | Eine Charge enthält nur Sätze einer Station | abgeleitet aus dem Materialpfad (datenmodell-mes.md, Abschnitt 5); keine MES-Sperre | schränkt zulässige Kombinationen ein | Dozent oder Referenzpaket |
 | A-07 | Hintransport als Festwert 130 s im Hauptvergleich | Median aus B-14; enthält Wartezeit | überschätzt die reine Fahrzeit | Sensitivität im Szenario `unsicherheit` |
 | A-08 | Alle Zahlenwerte in `config/szenarien/` sind Entwürfe | L-09 | Versuchsergebnisse | AP5 mit Begründung im Versuchsplan |
+| A-09 | V0 bedient die Stationen zyklisch in der Folge RASS1, RASS2, RASS3 und beginnt danach wieder bei RASS1. Passen die offenen Sätze einer Station nicht in eine Box (mehr als 8 Positionen), wird die Box in Eingangsfolge gefüllt und der Rest in der nächsten Runde versorgt | Beobachtet ist nur ein Durchlauf mit je drei Sätzen (B-08); historische Kommissionieraufträge haben höchstens 8 Positionen (B-15). Die Reihum-Regel verhindert, dass eine Station mit hohem Bedarf die anderen dauerhaft verdrängt | bestimmt V0 in Bedarfsspitze und Stressfällen; für die Validierung am 09.11.2026 ohne Wirkung | Dozent oder Referenzpaket (L-01) |
 
 ## 3. Abweichungen zwischen Projektauftrag und Repo
 
