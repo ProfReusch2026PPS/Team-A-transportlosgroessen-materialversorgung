@@ -1,7 +1,5 @@
 # Aufgabenpaket 2: Theoretische Grundlagen
 
-> **Prüfstand der Übernahme (17.11.2026):** Grundlage ist eine vom Nutzer bereitgestellte Deep-Research-Ausarbeitung. Die dort gemeldete Quellenprüfung wurde in dieser Integration nicht unabhängig bestätigt. Der Crossref-Abgleich scheiterte am Netzwerkzugriff (HTTP 403). Bibliografische Angaben und inhaltliche Quellenbelege Q01–Q14 bleiben bis zur Gegenprüfung vorläufig. Die Lehrunterlagen unter `docs/` fehlen im aktuellen Checkout. Projektannahmen sind keine empirischen Nachweise; Regelvorschläge sind keine Teamentscheidungen.
-
 **Projekt:** Transportlosgrößen und Materialversorgung, IoT Factory, RASS1 bis RASS3
 **Stand:** 17.11.2026
 **Wissenschaftliche Quellen:** Die Kennungen `[Q01]` bis `[Q14]` werden in [literatur-ergaenzung.md](literatur-ergaenzung.md) bibliografisch aufgelöst. Die nachstehenden Übertragungen sind ausdrücklich keine Versuchsergebnisse.

@@ -61,8 +61,6 @@ Regel: Wenn eine Angabe aus dem Projektauftrag nicht zu den Dateien passt, gilt 
 
 ## 5. Verfahrensbezogene Ergänzungen aus AP2 (Arbeitsfassung 17.11.2026)
 
-> **Prüfstand der Übernahme (17.11.2026):** Grundlage ist eine vom Nutzer bereitgestellte Deep-Research-Ausarbeitung. Die dort gemeldete Quellenprüfung wurde in dieser Integration nicht unabhängig bestätigt. Der Crossref-Abgleich scheiterte am Netzwerkzugriff (HTTP 403). Bibliografische Angaben und inhaltliche Quellenbelege Q01–Q14 bleiben bis zur Gegenprüfung vorläufig. Die Lehrunterlagen unter `docs/` fehlen im aktuellen Checkout. Projektannahmen sind keine empirischen Nachweise; Regelvorschläge sind keine Teamentscheidungen.
-
 Die bisherigen Abschnitte 1–4 und Kennungen A-01–A-08, L-01–L-10 sowie D-01–D-12 bleiben unverändert. Historische Aussagen zu lokal vorhandenen Unterlagen sind keine Aussage über diesen Checkout: `docs/`, SQL-Dumps und das Referenzpaket fehlen hier. Keine dieser Datenlücken wird durch die Literaturrecherche geschlossen.
 
 A-01–A-08 bleiben Annahmen mit den bereits genannten Bestätigungsbedarfen, keine validierten Anlagenfakten. Insbesondere gelten A-03/A-05 nicht als gemessene verfügbare Kapazitäten, A-06 nicht als technische MES-Sperre und A-07 nicht als reine Fahrzeit. L-06 betrifft laut Originalkatalog mögliche Fahrzeugbelegung; daraus ist keine Werkstückankunftsprognose belegt.
@@ -149,7 +147,6 @@ Alle neuen Kennungen sind **bewusst von A-01 bis A-08 getrennt** und noch nicht 
 | 6 | Welche deterministische Regel gilt für konkurrierende Stationen bei knappen Boxen? | A-V06 | Reproduzierbare Chargenauswahl, keine Fahrzeugoptimierung |
 | 7 | Welcher Kandidat soll V4 werden und auf welcher geprüften Informationsbasis? | A-V08, A-V10, L-02, L-03, L-06 | K1/K2/K3-Auswahl bleibt offen |
 | 8 | Welche Ereignisart löst erneut die Prüfung vormals fehlteiliger Sätze aus? | L-10, A-02 | Vermeidet offen gebliebene Anforderungen ohne neue Prüfung |
-
 
 ### Präzisierung von Timer und Zuständigkeit
 

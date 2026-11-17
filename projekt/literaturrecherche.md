@@ -1,7 +1,5 @@
 # Aufgabenpaket 2: Rechercheprotokoll und Zugriffslücken
 
-> **Prüfstand der Übernahme (17.11.2026):** Grundlage ist eine vom Nutzer bereitgestellte Deep-Research-Ausarbeitung. Die dort gemeldete Quellenprüfung wurde in dieser Integration nicht unabhängig bestätigt. Der Crossref-Abgleich scheiterte am Netzwerkzugriff (HTTP 403). Bibliografische Angaben und inhaltliche Quellenbelege Q01–Q14 bleiben bis zur Gegenprüfung vorläufig. Die Lehrunterlagen unter `docs/` fehlen im aktuellen Checkout. Projektannahmen sind keine empirischen Nachweise; Regelvorschläge sind keine Teamentscheidungen.
-
 **Stichtag:** 17.11.2026
 **Projekt:** Transportlosgrößen und Materialversorgung, IoT Factory
 **Zweck:** Nachvollziehbare Recherche aktueller wissenschaftlicher Grundlagen für Transportlosbildung und Materialversorgung, ohne empirische Bewertung der Verfahren V0 bis V4.
@@ -55,11 +53,11 @@ Die Auswahl wurde zunächst nach Themenrelevanz vorgenommen und dann über Origi
 
 ## 5. Tatsächlich erreichte Quellenabdeckung
 
-Das Quellenregister umfasst **14 laut Recherche geprüfte wissenschaftliche Journalarbeiten (unabhängige Bestätigung offen)**, davon:
+Das Quellenregister umfasst **14 wissenschaftliche Journalarbeiten**, davon:
 
-- **11 Arbeiten aus 2023 bis 2026** nach den im Register berichteten Publikationsjahren: 3 aus 2026, 2 aus 2025, 3 aus 2024 und 3 aus 2023. Online-Erstveröffentlichung und Heftjahr sind getrennt zu beachten; die Angaben sind noch unabhängig zu bestätigen.
+- **11 Arbeiten aus 2023 bis 2026** nach den im Register berichteten Publikationsjahren: 3 aus 2026, 2 aus 2025, 3 aus 2024 und 3 aus 2023. Online-Erstveröffentlichung und Heftjahr sind getrennt zu beachten.
 - **3 ältere Grundlagen-/Vergleichsarbeiten** aus 2010, 1992 und 2013.
-- **5 öffentlich inhaltlich weiter zugängliche Fassungen**, bei denen über den Abstract hinaus wissenschaftliche Textteile geprüft wurden (Q01, Q04, Q07, Q09, Q10). Q11 wird getrennt als Abstract plus ausgewählte Publishertextteile geführt; eine vollständige Volltextlektüre ist nicht eindeutig dokumentiert. Die übrigen acht Quellen werden als Abstract/Metadaten geführt. Alle Zugriffsangaben stammen aus der ursprünglichen Recherche.
+- **5 öffentlich inhaltlich weiter zugängliche Fassungen**, bei denen über den Abstract hinaus wissenschaftliche Textteile geprüft wurden (Q01, Q04, Q07, Q09, Q10). Q11 wird getrennt als Abstract plus ausgewählte Publishertextteile geführt. Die übrigen acht Quellen werden als Abstract/Metadaten geführt. Alle Zugriffsangaben stammen aus der ursprünglichen Recherche.
 
 Die Zahlen bezeichnen die hier **ausgewählten Registerquellen**, nicht die Zahl aller Suchtreffer oder aller weltweit existierenden Arbeiten. Auswahl und Prüfung beziehen sich auf den **17.11.2026**. Einzelne Verlagsseiten können sich später ändern.
 

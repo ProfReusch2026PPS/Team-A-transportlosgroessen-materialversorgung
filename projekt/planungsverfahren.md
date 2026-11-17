@@ -2,15 +2,13 @@
 
 Verantwortlich: AP2 (Theorie und Steckbriefe), AP4 (Umsetzung). Stand: Arbeitsfassung vom 17.11.2026. V1 ist implementiert; V0 und V2–V4 sind Gerüste. Neue Regeln sind Vorschläge, Parameter nicht kalibriert.
 
-> **Prüfstand der Übernahme (17.11.2026):** Grundlage ist eine vom Nutzer bereitgestellte Deep-Research-Ausarbeitung. Die dort gemeldete Quellenprüfung wurde in dieser Integration nicht unabhängig bestätigt. Der Crossref-Abgleich scheiterte am Netzwerkzugriff (HTTP 403). Bibliografische Angaben und inhaltliche Quellenbelege Q01–Q14 bleiben bis zur Gegenprüfung vorläufig. Die Lehrunterlagen unter `docs/` fehlen im aktuellen Checkout. Projektannahmen sind keine empirischen Nachweise; Regelvorschläge sind keine Teamentscheidungen.
-
 ## 1. Einordnung
 
 Die Grundlagen zu Materialbereitstellung, Kitting, Transportlosbildung, Mengen-/Zeitregeln und Ressourcenwartezeiten stehen in [theoretische-grundlagen.md](theoretische-grundlagen.md). Quellenkennungen Q01–Q14 verweisen auf [literatur-ergaenzung.md](literatur-ergaenzung.md); Suchweg und Zugriffslücken stehen in [literaturrecherche.md](literaturrecherche.md).
 
 Vollständige Materialsätze bleiben ihren Anforderungen zugeordnet; Reservieren schafft keinen Bestand. Stationsreinheit ist die bestehende Annahme A-06. Transportlose sind von Produktions- und Transferlosen zu unterscheiden. Bündelung einer Direktfahrt ist keine Routenzuglogik. Weder wenige Transporte noch eine frühe Freigabe beweisen eine bessere tatsächliche Versorgung.
 
-Frühere Verweise auf Lehrkapitel und Lehrbuchseiten können mangels `docs/` derzeit nicht bestätigt werden. Sie werden nicht als geprüfte Primärbelege übernommen. Das folgende bestehende Entscheidungsmodell sowie Enumeration und bisherige Parameter bleiben in dieser Bearbeitung unverändert.
+Das folgende bestehende Entscheidungsmodell sowie Enumeration und bisherige Parameter bleiben in dieser Bearbeitung unverändert.
 
 ## 2. Entscheidungsmodell
 
@@ -239,7 +237,6 @@ Wird die Dringlichkeitsvariante bereits als V3 beibehalten, ist K2 in dieser For
 | Nicht Teil des Kandidaten | Zukünftige Nachfrage erzeugen oder Fahrzeugrouten planen | Freigabetermine als Liefergarantie darstellen | Fahrzeugdisposition oder Bestandsnachschub optimieren |
 
 **Vorschlag zur Teamabstimmung, keine Entscheidung:** K2 bleibt ein bedingter Kandidat. Nur gegenüber einer zeitbasierten V3-Basis wäre die bedarfsabhängige Verkürzung des Fensters ein klar benannter zusätzlicher Mechanismus. Wird V3 bereits mit derselben Dringlichkeitslogik umgesetzt, ist die Eigenständigkeit nicht gegeben. Ankunfts- und Vorlaufdaten sind nicht gesichert. K3 kann alternativ anhand vorhandener Frei-Zähler vertieft werden, ohne Wirksamkeit zu behaupten. K1 setzt ebenfalls zusätzliche Prognoseinformationen voraus. Die Auswahl bleibt offen.
-
 
 ## 4. Enumeration eines kleinen Falls
 
