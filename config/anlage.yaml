@@ -6,8 +6,17 @@
 #             annahme    = Szenario- oder Modellannahme (docs/projekt/annahmen-und-datenluecken.md)
 #             offen      = noch nicht belegbar; wert ist null, die Simulation darf ihn nicht nutzen
 # Zeiten in Sekunden. Stand der MES-Werte: Snapshot 2026-11-09 15:57.
+#
+# Zeiten: Festwert = Median der gefilterten Schritte (Hauptvergleich). Für das Szenario
+# "unsicherheit" gibt es zu jedem Zeitparameter mit Verteilung eine empirische Verteilung unter
+# demselben Parameterpfad: matsim.daten.zeiten.verteilung("kommissionierplatz.pickzeit_je_teil_s")
+# liefert ein Objekt mit .ziehe(rng). Erzeugt mit "python -m matsim.daten zeiten".
 schema_version: 1
 zeiteinheit: s
+zeitverteilungen:
+  wert: data/processed/zeitverteilungen.json
+  herkunft: abgeleitet
+  beleg: "matsim.daten.zeiten.leite_verteilungen_ab, Snapshot 15:57; Störungen entfernt (datenmodell-mes.md, Abschnitt 6)"
 
 teile:
   800: IoT main PCB
@@ -23,43 +32,111 @@ teile:
 box:
   typ_pno: {wert: 29, herkunft: mes, beleg: "tblboxdef.BoxPNo"}
   positionen: {wert: 8, herkunft: mes, beleg: "tblboxdef.PosCount = 8, RowCount = 4"}
+  # Boxbestand nur aus tblbufferpos, jede Box einmal (doppelt verortete Box 11 über den jüngsten
+  # Zeitstempel aufgelöst, B-11). Funktion: matsim.daten.bestand.startbestand, Snapshot 15:57.
+  # 21 verortete Boxen = 7 leere Transportboxen + 13 Quellboxen mit Teilen + Box 38 an AASS1.
   anzahl_stammdaten: {wert: 40, herkunft: mes, beleg: "tblboxdef.Count; tblbox hat 40 Zeilen"}
   anzahl_verortet: {wert: 21, herkunft: abgeleitet, beleg: "distinct tblbufferpos.BoxID > 0, in allen 6 Snapshots 21 (B-09)"}
+  anzahl_ohne_ort:
+    wert: 19
+    herkunft: abgeleitet
+    beleg: "nicht in tblbufferpos, in allen 6 Snapshots gleich; seit 30.10.2026 nicht kommissioniert, 5 nie (B-21); gehen nicht in die Simulation (A-03, L-08)"
   transportboxen_frei:
     wert: 7
     herkunft: abgeleitet
-    beleg: "leere verortete Boxen im Snapshot 15:57 ohne Box 38 am AASS1-Cache; als Boxbestand zu bestätigen (A-03)"
+    beleg: "leere verortete Boxen 2, 4, 11, 15, 18, 34, 39 im Snapshot 15:57; ohne Box 38 am Handarbeitsplatz AASS1 (seit 12.03.2026 nicht kommissioniert) (A-03)"
+  quellboxen_mit_teilen:
+    wert: 13
+    herkunft: abgeleitet
+    beleg: "verortete Boxen mit freien Teilen im Lager 17, Snapshot 15:57; ihr Inhalt ist materiallager.anfangsbestand"
+
+# Beladungsregeln (Issue #4). Belege: docs/projekt/datenmodell-mes.md, Abschnitt 5. "mes" heißt:
+# im hinterlegten SQL oder Arbeitsplan festgelegt; "abgeleitet": aus der Historie belegt, aber
+# vom MES nicht erzwungen.
+beladung:
+  stationen_je_box:
+    wert: 1
+    herkunft: abgeleitet
+    beleg: "Kommissionierplan WPNo 1/2/3 liefert per OpNo 215 an genau eine Ressource 2/4/6 (tblstepdef Schritt 20); Montage findet Teile nur in einer Box an der eigenen Ressource (tblstepparameterdef 1000/30 Parameter 2); Historie: nie gemischt, 229 Zielbox-Nutzungen (B-23). Keine Sperre im MES (A-06)"
+  zielboxen_je_kommissionierauftrag:
+    wert: 1
+    herkunft: abgeleitet
+    beleg: "229 von 229 Kommissionieraufträgen setzen alle Teile in dieselbe Zielbox (tblfinstepparameter Parameter 6)"
+  satz_vollstaendig_in_einer_box:
+    wert: true
+    herkunft: abgeleitet
+    beleg: "Aufgabenstellung; Historie WPNo 1000: 262 Sätze vollständig in einer Box, 0 geteilt, 0 unvollständig, 2 ohne Pick (B-24)"
+  max_saetze_je_box:
+    RASS1: {wert: 4, herkunft: abgeleitet, beleg: "box.positionen 8 / Satzgröße 2; 15 Kommissionieraufträge mit 8 Teilen für RASS1 (B-15)"}
+    RASS2: {wert: 4, herkunft: abgeleitet, beleg: "box.positionen 8 / Satzgröße 2; 10 Kommissionieraufträge mit 8 Teilen für RASS2 (B-15)"}
+    RASS3: {wert: 8, herkunft: abgeleitet, beleg: "box.positionen 8 / Satzgröße 1; 3 Kommissionieraufträge mit 8 Teilen für RASS3 (B-15)"}
+  saetze_verschiedener_auftraege_in_einer_box:
+    wert: true
+    herkunft: mes
+    beleg: "Jede Position eines Kommissionierauftrags nennt ihren Produktionsauftrag (Parameter 8/9); 28 von 229 Aufträgen bündeln Sätze mehrerer Produktionsaufträge, z. B. 9177: 9176/1, 9178/1, 9178/2"
+  wiederverwendung_erst_nach_leerung:
+    wert: true
+    herkunft: abgeleitet
+    beleg: "Keine Zielbox trug je Teile zweier Kommissionieraufträge gleichzeitig (B-23); Box 11 erst für 9177 (RASS1), nach Leerung für 9180 (RASS3)"
+  reservierung_ab_freigabe:
+    wert: true
+    herkunft: mes
+    beleg: "Quellteile und Zielplätze sind ab Freigabe des Kommissionierauftrags mit dessen ONo/OPos gebunden (Snapshot 15:22: Box 4 Platz 7 für 9179/3); bei Ablieferung bucht das SQL von OpNo 215 auf den Produktionsauftrag um (tblstepdef WPNo 1 Schritt 20 SqlWrite)"
+  montage_nur_aus_box_an_eigener_station:
+    wert: true
+    herkunft: mes
+    beleg: "tblstepparameterdef 1000/30, 60, 100, 110, 160 Parameter 2: Boxplatz mit ONo, OPos und PNo des Werkstücks an tblbufferpos.ResourceId der Station"
 
 materiallager:
   resource_id: {wert: 17, herkunft: mes, beleg: "tblresource: CP-F-ASRS20-B, tblbuffer 17/1 Storage 4x5"}
   lagerplaetze: {wert: 20, herkunft: mes, beleg: "tblbufferpos ResourceId 17, BufNo 1: 20 Zeilen"}
-  # Anfangsbestand je Teil: nur Teile in verorteten Boxen (B-10). Snapshot 15:57, alles frei.
+  # Anfangsbestand je Teil (A-02): freie Teile (ONo = 0) in verorteten Boxen im Kreislauf,
+  # Snapshot 15:57. Grund für 15:57: Ruhezustand nach Produktionsende, keine Reservierungen,
+  # keine Box unterwegs. Reservierungen sind kein zusätzlicher Bestand. Funktion:
+  # matsim.daten.bestand.startbestand. Achtung: reicht für 4 vollständige Produkte (L-11).
   anfangsbestand:
-    800: {wert: 4, herkunft: abgeleitet, beleg: "tblboxpos in verorteten Boxen; weitere 5 in nicht verorteten Boxen"}
-    811: {wert: 5, herkunft: abgeleitet, beleg: "tblboxpos in verorteten Boxen"}
-    812: {wert: 9, herkunft: abgeleitet, beleg: "tblboxpos in verorteten Boxen"}
-    813: {wert: 5, herkunft: abgeleitet, beleg: "tblboxpos in verorteten Boxen"}
-    814: {wert: 4, herkunft: abgeleitet, beleg: "tblboxpos in verorteten Boxen; weitere 9 in nicht verorteten Boxen"}
-    831: {wert: 5, herkunft: abgeleitet, beleg: "tblboxpos in verorteten Boxen"}
-    832: {wert: 8, herkunft: abgeleitet, beleg: "tblboxpos in verorteten Boxen; 1 weiteres in nicht verorteter Box"}
-    833: {wert: 7, herkunft: abgeleitet, beleg: "tblboxpos in verorteten Boxen"}
-    834: {wert: 9, herkunft: abgeleitet, beleg: "tblboxpos in verorteten Boxen"}
+    800: {wert: 4, herkunft: abgeleitet, beleg: "tblboxpos, verortete Boxen, Snapshot 15:57; weitere 5 in Boxen ohne Ort"}
+    811: {wert: 5, herkunft: abgeleitet, beleg: "tblboxpos, verortete Boxen, Snapshot 15:57"}
+    812: {wert: 9, herkunft: abgeleitet, beleg: "tblboxpos, verortete Boxen, Snapshot 15:57"}
+    813: {wert: 5, herkunft: abgeleitet, beleg: "tblboxpos, verortete Boxen, Snapshot 15:57"}
+    814: {wert: 4, herkunft: abgeleitet, beleg: "tblboxpos, verortete Boxen, Snapshot 15:57; weitere 9 in Boxen ohne Ort"}
+    831: {wert: 5, herkunft: abgeleitet, beleg: "tblboxpos, verortete Boxen, Snapshot 15:57"}
+    832: {wert: 8, herkunft: abgeleitet, beleg: "tblboxpos, verortete Boxen, Snapshot 15:57; 1 weiteres in Box ohne Ort"}
+    833: {wert: 7, herkunft: abgeleitet, beleg: "tblboxpos, verortete Boxen, Snapshot 15:57"}
+    834: {wert: 9, herkunft: abgeleitet, beleg: "tblboxpos, verortete Boxen, Snapshot 15:57"}
+  # Nur für die Sensitivitätsanalyse (A-02): Teile in Boxen ohne Ort, nicht im Basisfall.
+  bestand_ohne_ort:
+    800: {wert: 5, herkunft: abgeleitet, beleg: "tblboxpos, Boxen 14 und 23 ohne Ort (B-10)"}
+    814: {wert: 9, herkunft: abgeleitet, beleg: "tblboxpos, Boxen 1 und 14 ohne Ort (B-10)"}
+    832: {wert: 1, herkunft: abgeleitet, beleg: "tblboxpos, Box 19 ohne Ort (B-10)"}
+  vollstaendige_produkte_aus_anfangsbestand:
+    wert: 4
+    herkunft: abgeleitet
+    beleg: "Minimum über die Sätze von WPNo 1000: RASS1 min(800: 4, 814: 4) = 4, RASS2 min(813: 5, 811: 5) = 5, RASS3 831: 5 (L-11)"
 
 kommissionierplatz:
   resource_id: {wert: 19, herkunft: mes, beleg: "tblresource: CP-PICKSORT"}
-  gleichzeitige_chargen: {wert: 1, herkunft: annahme, beleg: "A-04: am 09.11.2026 liefen die Kommissionieraufträge nacheinander"}
-  pickzeit_je_teil_s: {wert: 23, herkunft: abgeleitet, beleg: "Median OpNo 220 an Ressource 19, n = 748, q10/q90 = 21/25 s (B-13)"}
+  gleichzeitige_chargen: {wert: 1, herkunft: abgeleitet, beleg: "229 Kommissionieraufträge 11.06.2025 bis 09.11.2026, kein überlappendes Paar (zeiten.kommissionier_ueberlappungen, A-04)"}
+  pickzeit_je_teil_s: {wert: 23, herkunft: abgeleitet, beleg: "Median OpNo 220 an Ressource 19, n = 748, q10/q90 = 21/25 s (B-13); Verteilung ohne 26 Störungen über 46 s"}
   pickzeit_stammdaten_s: {wert: 20, herkunft: mes, beleg: "tblresourceoperation 19/220 WorkingTime"}
 
 fahrzeuge:
   anzahl_stammdaten: {wert: 6, herkunft: mes, beleg: "tblresource 20-25 LOG-MR-B"}
-  anzahl: {wert: 2, herkunft: annahme, beleg: "A-05: am Nachmittag des 09.11.2026 meldeten nur die Ressourcen 24 und 25 (tblmachinereport)"}
+  anzahl: {wert: 2, herkunft: annahme, beleg: "A-05: seit 03.11.2026 melden nur die Robotinos 24 und 25 Busy-Abschnitte, höchstens 2 gleichzeitig (tblmachinereport, B-22); an früheren Tagen 1 bis 6 aktiv und bis zu 6 gleichzeitig; mehr Fahrzeuge nur als Sensitivität"}
   boxplaetze_je_fahrzeug: {wert: 1, herkunft: mes, beleg: "tblbuffer 20-25: storage 1x1"}
   hintransport_s:
     wert: 130
     herkunft: abgeleitet
-    beleg: "Median Ende letzter Pick bis Ende erster OpNo 215, n = 229; enthält Wartezeiten, keine reine Fahrzeit (B-14, L-03)"
-  leerboxruecktransport_s: {wert: null, herkunft: offen, beleg: "L-03: Robotino-Fahrten stehen nicht in tblfinstep"}
+    beleg: "Median Ende letzter Pick bis Ende erster OpNo 215, n = 229; enthält Warten auf ein Fahrzeug. Nur verwenden, wenn Fahrzeuge nicht als Ressource modelliert sind (A-07)"
+  # Mit Fahrzeugen als Ressource: Fahrauftrag statt hintransport_s, das Warten entsteht im Modell.
+  fahrauftrag_s:
+    wert: 96
+    herkunft: abgeleitet
+    beleg: "Median (nach Entfernen einer Störung) Aufnahme an der Kommissionierung, Fahrt und Übergabe bis Start OpNo 215, aus Busy-Abschnitten in tblmachinereport, n = 170 von 229 zuordenbar, q10/q90 = 68/143 s (B-22, L-03); am 09.11.2026: 109, 113, 109 s"
+  leerboxruecktransport_s:
+    wert: 96
+    herkunft: annahme
+    beleg: "A-09: wie fahrauftrag_s (gleiche Strecke Station - Lager, gleiche Übergaben); Rückfahrten sind weder in tblfinstep noch eindeutig in tblmachinereport erkennbar (L-03)"
 
 stationen:
   RASS1:
@@ -69,7 +146,12 @@ stationen:
       800: {wert: 1, herkunft: mes, beleg: "tblstepdef 1000/30 OpNo 323, Parameter 3 = 800"}
       814: {wert: 1, herkunft: mes, beleg: "tblstepdef 1000/60 OpNo 323, Parameter 3 = 814"}
     zulaessige_teile: {wert: [800, 814], herkunft: mes, beleg: "tblpnogroup 5 'RASS1 material'; Auswahlliste WPNo 1, Schritt 10, Parameter 11"}
-    montagezeit_je_teil_s: {wert: 37, herkunft: abgeleitet, beleg: "Median OpNo 323 an Ressource 2, n = 236"}
+    montagezeit_je_teil_s: {wert: 37, herkunft: abgeleitet, beleg: "Median OpNo 323 an Ressource 2, n = 236; Median über beide Teile, für die Simulation montagezeit_s je Teil verwenden"}
+    # Zweigipflig je Satz: das erste Teil dauert länger als das zweite (datenmodell-mes.md, Abschnitt 6).
+    montagezeit_s:
+      800: {wert: 39, herkunft: abgeleitet, beleg: "Median OpNo 323 mit Teil 800 (erstes Teil des Satzes: Mainboard), n = 123, q10/q90 der Verteilung = 37/41 s"}
+      814: {wert: 28, herkunft: abgeleitet, beleg: "Median OpNo 323 mit Teil 814 (zweites Teil: Display), n = 113, q10/q90 der Verteilung = 25/29 s"}
+    belegung_je_werkstueck_s: {wert: 136, herkunft: abgeleitet, beleg: "Median erster Start bis letztes Ende je Werkstück WPNo 1000 an der Station (Abdeckung, Montage, Ablegen), n = 87, q10/q90 der Verteilung = 133/148 s; Station ist so lange belegt"}
   RASS2:
     resource_id: {wert: 4, herkunft: mes, beleg: "tblresource: CP-F-RASS-2"}
     uebergabeplaetze: {wert: 2, herkunft: mes, beleg: "tblbuffer 4/1 Box 1x2"}
@@ -77,14 +159,22 @@ stationen:
       813: {wert: 1, herkunft: mes, beleg: "tblstepdef 1000/100 OpNo 324, Parameter 4 = 813"}
       811: {wert: 1, herkunft: mes, beleg: "tblstepdef 1000/110 OpNo 324, Parameter 4 = 811"}
     zulaessige_teile: {wert: [811, 812, 813], herkunft: mes, beleg: "tblpnogroup 6 'RASS2 material'; Auswahlliste WPNo 2"}
-    montagezeit_je_teil_s: {wert: 39, herkunft: abgeleitet, beleg: "Median OpNo 324 an Ressource 4, n = 213"}
+    montagezeit_je_teil_s: {wert: 39, herkunft: abgeleitet, beleg: "Median OpNo 324 an Ressource 4, n = 213; Median über beide Teile, für die Simulation montagezeit_s je Teil verwenden"}
+    # Zweigipflig je Satz: das erste Teil dauert länger als das zweite (datenmodell-mes.md, Abschnitt 6).
+    montagezeit_s:
+      813: {wert: 40, herkunft: abgeleitet, beleg: "Median OpNo 324 mit Teil 813 (erstes Teil des Satzes: Analog-Platine), n = 100, q10/q90 der Verteilung = 39/40 s"}
+      811: {wert: 25, herkunft: abgeleitet, beleg: "Median OpNo 324 mit Teil 811 (zweites Teil: Gyroskop), n = 103, q10/q90 der Verteilung = 24/25 s"}
+    belegung_je_werkstueck_s: {wert: 121, herkunft: abgeleitet, beleg: "Median erster Start bis letztes Ende je Werkstück WPNo 1000 an der Station (Abdeckung, Montage, Ablegen), n = 87, q10/q90 der Verteilung = 120/122 s; Station ist so lange belegt"}
   RASS3:
     resource_id: {wert: 6, herkunft: mes, beleg: "tblresource: CP-F-RASS-3"}
     uebergabeplaetze: {wert: 2, herkunft: mes, beleg: "tblbuffer 6/1 Box 1x2"}
     materialsatz:
       831: {wert: 1, herkunft: mes, beleg: "tblstepdef 1000/160 OpNo 325, Parameter 3 = 831"}
     zulaessige_teile: {wert: [831, 832, 833, 834], herkunft: mes, beleg: "tblpnogroup 12 'RASS3 material'; Auswahlliste WPNo 3"}
-    montagezeit_je_teil_s: {wert: 24, herkunft: abgeleitet, beleg: "Median OpNo 325 an Ressource 6, n = 123"}
+    montagezeit_je_teil_s: {wert: 24, herkunft: abgeleitet, beleg: "Median OpNo 325 an Ressource 6, n = 123; gleich montagezeit_s.831"}
+    montagezeit_s:
+      831: {wert: 24, herkunft: abgeleitet, beleg: "Median OpNo 325 mit Teil 831 (Frontabdeckung), n = 118, q10/q90 der Verteilung = 23/26 s"}
+    belegung_je_werkstueck_s: {wert: 63, herkunft: abgeleitet, beleg: "Median erster Start bis letztes Ende je Werkstück WPNo 1000 an der Station (Abdeckung, Montage, Ablegen), n = 86, q10/q90 der Verteilung = 61/66 s; Station ist so lange belegt"}
 
 werkstueckumlauf:
   # Bandtopologie laut tbltopology: Stationsfolge der inneren Schleife.
@@ -92,5 +182,6 @@ werkstueckumlauf:
   auslagern_s: {wert: 16, herkunft: abgeleitet, beleg: "Median OpNo 212 an Ressource 1, n = 132"}
   einlagern_s: {wert: 15, herkunft: abgeleitet, beleg: "Median OpNo 211 an Ressource 1, n = 145"}
   weiterfahrt_bei_materialmangel: {wert: true, herkunft: annahme, beleg: "A-01: Aufgabenstellung Team C 'Fehlt Material, fährt das Werkstück weiter'; Referenzpaket fehlt"}
-  umlaufzeit_s: {wert: null, herkunft: offen, beleg: "L-02: Bandlaufzeiten sind in den MES-Daten nicht aufgezeichnet"}
+  bandsegment_s: {wert: 14, herkunft: abgeleitet, beleg: "Median Ende Schritt an RASS1/2/3 bis Start an der Folgestation 3/5/7 desselben Werkstücks, n = 319, q10/q90 = 13/15 s"}
+  umlaufzeit_s: {wert: 140, herkunft: annahme, beleg: "A-10: 10 Bandsegmente der inneren Schleife zu je 14 s (bandsegment_s); nur 3 der 10 Segmente sind ohne Wartezeit messbar (L-02)"}
   wiederkehrregel: {wert: null, herkunft: offen, beleg: "L-01: legt das Referenzpaket fest"}

@@ -72,13 +72,61 @@ def verbinde():
     )
 
 
-def lies(sql: str, parameter: tuple = ()) -> list[tuple]:
-    """Führt ein geprüftes SELECT aus und liefert alle Zeilen."""
+def lies(sql: str, parameter: tuple = (), verbindung=None) -> list[tuple]:
+    """Führt ein geprüftes SELECT aus und liefert alle Zeilen.
+
+    Ohne ``verbindung`` wird eine eigene Verbindung geöffnet und wieder geschlossen.
+    """
     pruefe_nur_lesend(sql)
-    verbindung = verbinde()
+    eigene = verbindung is None
+    verbindung = verbinde() if eigene else verbindung
     try:
         cursor = verbindung.cursor()
         cursor.execute(sql, parameter)
         return cursor.fetchall()
     finally:
-        verbindung.close()
+        if eigene:
+            verbindung.close()
+
+
+#: Tabellen für den Abgleich Live gegen Snapshot: Stammdaten (sollten gleich sein) und
+#: Zustands- bzw. Historientabellen (dürfen sich seit dem Export bewegt haben).
+VERGLEICHSTABELLEN = (
+    "tblresource",
+    "tblbuffer",
+    "tbltopology",
+    "tblboxdef",
+    "tblbox",
+    "tblparts",
+    "tblstepdef",
+    "tblstepparameterdef",
+    "tbloperation",
+    "tblsqlquery",
+    "tblboxpos",
+    "tblbufferpos",
+    "tblorder",
+    "tblfinorder",
+    "tblfinorderpos",
+    "tblfinstep",
+    "tblmachinereport",
+)
+
+
+def vergleiche_mit_snapshot(snapshot, verbindung=None) -> list[tuple[str, int, int]]:
+    """Zeilenzahl je Tabelle in der Live-Datenbank und in einem importierten Snapshot.
+
+    ``snapshot`` ist eine ``sqlite3.Connection``. Liefert ``(Tabelle, live, snapshot)``. Es
+    werden nur ``SELECT COUNT(*)`` ausgeführt.
+    """
+    eigene = verbindung is None
+    verbindung = verbinde() if eigene else verbindung
+    try:
+        ergebnis = []
+        for tabelle in VERGLEICHSTABELLEN:
+            live = lies(f"SELECT COUNT(*) FROM {tabelle}", verbindung=verbindung)[0][0]
+            lokal = snapshot.execute(f"SELECT COUNT(*) FROM {tabelle}").fetchone()[0]
+            ergebnis.append((tabelle, live, lokal))
+        return ergebnis
+    finally:
+        if eigene:
+            verbindung.close()
