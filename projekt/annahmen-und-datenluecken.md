@@ -15,7 +15,7 @@ Verantwortlich: AP2 (Katalog), Inhalte von allen Paketen. Jede Annahme wird hier
 | L-07 | Box 11 im Snapshot 15:57 doppelt verortet (B-11) | Boxbestand je Ort nicht eindeutig | AP1 | offen |
 | L-08 | Verfügbarer Boxbestand: Stammdaten nennen 40 Boxen, verortet sind 21, davon 8 leer (B-09, B-10) | Boxbestand der Simulation ist eine Annahme (A-03) | AP1, Zählung im Labor | offen |
 | L-09 | Bedarfseingang: In den Daten gibt es nur den einen Ablauf mit drei Produkten; ein Bedarfsmuster für Basis- und Stressfall ist nicht ableitbar | Bedarfsmuster sind Szenarioannahmen | AP5 | festgestellt |
-| L-10 | Live-Zugriff im Labornetz wurde in diesem Durchlauf nicht ausgeführt | `matsim.daten.live` ist ungetestet gegen die echte Datenbank | AP1 im Labor | offen |
+| L-10 | Live-Zugriff im Labornetz wurde noch nicht ausgeführt. Der Vergleich ist als Befehl vorbereitet: `python -m matsim.daten live-vergleich` zählt die Zeilen von 17 Tabellen live und im Snapshot (nur `SELECT COUNT(*)`) | `matsim.daten.live` ist ungetestet gegen die echte Datenbank; ob die Snapshots dem Live-Stand entsprechen, ist nicht geprüft | AP1 im Labor, Ergebnis in datenmodell-mes.md Abschnitt 4.3 eintragen | offen, Befehl vorbereitet |
 
 ## 2. Annahmen
 

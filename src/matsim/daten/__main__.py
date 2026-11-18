@@ -5,6 +5,9 @@ Beispiele::
     python -m matsim.daten importiere
     python -m matsim.daten vergleiche 2026-11-09_1516 2026-11-09_1557
     python -m matsim.daten bestand 2026-11-09_1516
+    python -m matsim.daten qualitaet
+    python -m matsim.daten stichprobe 9178
+    python -m matsim.daten live-vergleich 2026-11-09_1557
 """
 
 from __future__ import annotations
@@ -14,8 +17,10 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from matsim.daten import bestand, dump_import, snapshot_vergleich
+from matsim.daten import bestand, dump_import, materialpfad, qualitaet, snapshot_vergleich
 from matsim.pfade import INTERIM, ROH_SNAPSHOTS
+
+LETZTER_SNAPSHOT = "2026-11-09_1557"
 
 
 def _sqlite_pfad(kurzname: str) -> Path:
@@ -58,6 +63,41 @@ def _bestand(argumente: argparse.Namespace) -> None:
         verbindung.close()
 
 
+def _qualitaet(argumente: argparse.Namespace) -> None:
+    verbindung = sqlite3.connect(_sqlite_pfad(argumente.snapshot))
+    try:
+        print(f"Snapshot {argumente.snapshot}")
+        print(f"{'Nr.':<6}{'geprüft':>9}{'auffällig':>11}{'Anteil':>9}  Prüfung")
+        for e in qualitaet.pruefe_alle(verbindung):
+            print(f"{e.nr:<6}{e.geprueft:>9}{e.auffaellig:>11}{e.anteil:>9.1%}  {e.titel}")
+            print(f"{'':<6}auffällig: {e.pruefung}")
+            print(f"{'':<6}Beispiel: {e.beispiel}")
+    finally:
+        verbindung.close()
+
+
+def _stichprobe(argumente: argparse.Namespace) -> None:
+    verbindung = sqlite3.connect(_sqlite_pfad(argumente.snapshot))
+    try:
+        for zeitpunkt, text in materialpfad.verfolge_auftrag(verbindung, argumente.ono):
+            print(f"{zeitpunkt:%Y-%m-%d %H:%M:%S}  {text}")
+    finally:
+        verbindung.close()
+
+
+def _live_vergleich(argumente: argparse.Namespace) -> None:
+    from matsim.daten import live
+
+    snapshot = sqlite3.connect(_sqlite_pfad(argumente.snapshot))
+    try:
+        print(f"{'Tabelle':<24}{'live':>10}{'Snapshot':>10}{'Differenz':>11}")
+        for tabelle, zeilen_live, zeilen_snapshot in live.vergleiche_mit_snapshot(snapshot):
+            differenz = zeilen_live - zeilen_snapshot
+            print(f"{tabelle:<24}{zeilen_live:>10}{zeilen_snapshot:>10}{differenz:>+11}")
+    finally:
+        snapshot.close()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="python -m matsim.daten", description=__doc__)
     befehle = parser.add_subparsers(required=True)
@@ -72,6 +112,18 @@ def main() -> None:
     bestandsbefehl = befehle.add_parser("bestand", help="Teile-, Box- und Reservierungsbestand")
     bestandsbefehl.add_argument("snapshot")
     bestandsbefehl.set_defaults(funktion=_bestand)
+    qualitaetsbefehl = befehle.add_parser("qualitaet", help="Prüfungen zum Befundregister")
+    qualitaetsbefehl.add_argument("snapshot", nargs="?", default=LETZTER_SNAPSHOT)
+    qualitaetsbefehl.set_defaults(funktion=_qualitaet)
+    stichprobe = befehle.add_parser("stichprobe", help="Materialpfad eines Produktionsauftrags")
+    stichprobe.add_argument("ono", type=int)
+    stichprobe.add_argument("--snapshot", default=LETZTER_SNAPSHOT)
+    stichprobe.set_defaults(funktion=_stichprobe)
+    live_befehl = befehle.add_parser(
+        "live-vergleich", help="Zeilenzahlen live (nur lesend, Labornetz) gegen einen Snapshot"
+    )
+    live_befehl.add_argument("snapshot", nargs="?", default=LETZTER_SNAPSHOT)
+    live_befehl.set_defaults(funktion=_live_vergleich)
     argumente = parser.parse_args()
     argumente.funktion(argumente)
 

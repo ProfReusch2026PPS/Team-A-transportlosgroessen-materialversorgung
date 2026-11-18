@@ -69,6 +69,23 @@ def statistik(verbindung: sqlite3.Connection, opno: int, resource_id: int) -> Da
     )
 
 
+def quartile(werte: list[float]) -> tuple[float, float]:
+    """Unteres und oberes Quartil (Methode ``inclusive`` der Standardbibliothek)."""
+    q1, _, q3 = statistics.quantiles(werte, n=4, method="inclusive")
+    return q1, q3
+
+
+def tukey_grenzen(werte: list[float], faktor: float = 3.0) -> tuple[float, float]:
+    """Äußere Tukey-Grenzen ``Q1 - faktor * IQR`` und ``Q3 + faktor * IQR``.
+
+    Mit ``faktor = 3`` („far out“) gelten nur deutlich abgesetzte Werte als Ausreißer. Sie werden
+    als Störung gewertet (z. B. ein Pick mit 1051 s), nicht als normale Streuung.
+    """
+    q1, q3 = quartile(werte)
+    iqr = q3 - q1
+    return q1 - faktor * iqr, q3 + faktor * iqr
+
+
 def zeitverteilung(verbindung: sqlite3.Connection, opno: int, resource_id: int):
     """Leitet eine belegte Verteilung für das Unsicherheitsszenario ab (AP1).
 
