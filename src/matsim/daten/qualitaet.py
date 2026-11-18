@@ -300,11 +300,7 @@ def b13_zeitfilter(v: sqlite3.Connection) -> Pruefergebnis:
 
 @_pruefung("B-14")
 def b14_transportzeit(v: sqlite3.Connection) -> Pruefergebnis:
-    dauern = [
-        (a.ende - a.letzter_pick).total_seconds()
-        for a in materialpfad.ablieferungen(v)
-        if a.letzter_pick is not None
-    ]
+    dauern = zeiten.hintransportdauern(v)
     _, oben = zeiten.tukey_grenzen(dauern)
     ausreisser = sorted(d for d in dauern if d > oben)
     return Pruefergebnis(
@@ -438,6 +434,22 @@ def b21_boxen_ohne_ort_genutzt(v: sqlite3.Connection) -> Pruefergebnis:
         len(ohne_ort),
         len(am_tag),
         f"nie kommissioniert: {nie}; jüngste Nutzung: {juengste}",
+    )
+
+
+@_pruefung("B-22")
+def b22_fahrzeugzuordnung(v: sqlite3.Connection) -> Pruefergebnis:
+    zerlegt, ohne = zeiten.transportzerlegung(v)
+    tag = materialpfad.exportzeit(v).strftime("%Y-%m-%d")
+    aktiv = zeiten.aktive_fahrzeuge_je_tag(v).get(tag, [])
+    return Pruefergebnis(
+        "B-22",
+        "Zuordnung der Ablieferungen zu Robotino-Fahraufträgen (tblmachinereport)",
+        "Ablieferung ohne eindeutig zuordenbaren Busy-Abschnitt eines Robotinos",
+        len(zerlegt) + ohne,
+        ohne,
+        f"am {tag} aktiv: Robotinos {aktiv}, höchstens "
+        f"{zeiten.max_gleichzeitig_aktiv(v, tag)} gleichzeitig beschäftigt",
     )
 
 

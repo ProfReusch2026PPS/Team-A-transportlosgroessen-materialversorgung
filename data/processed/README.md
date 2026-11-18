@@ -1,6 +1,6 @@
 # Aufbereitete Daten (versioniert)
 
-Kleine Eingabe- und Ergebnistabellen (CSV oder Parquet), die aus den Dumps abgeleitet sind und von der Simulation oder der Hausarbeit gebraucht werden.
+Kleine Eingabe- und Ergebnistabellen (CSV, Parquet oder JSON), die aus den Dumps abgeleitet sind und von der Simulation oder der Hausarbeit gebraucht werden.
 
 Regeln:
 
@@ -10,4 +10,4 @@ Regeln:
 
 | Datei | Erzeugt von | Quelle | Inhalt |
 |---|---|---|---|
-| noch keine | | | |
+| `zeitverteilungen.json` | `python -m matsim.daten zeiten` (`matsim.daten.zeiten.leite_verteilungen_ab`) | Snapshot 2026-11-09_1557, `tblfinstep`, `tblfinstepparameter`, `tblmachinereport` | bereinigte Stichproben der Dauern je Parameter von `config/anlage.yaml`; Laden mit `matsim.daten.zeiten.verteilung(name)` |

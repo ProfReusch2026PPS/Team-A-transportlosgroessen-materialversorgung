@@ -6,8 +6,17 @@
 #             annahme    = Szenario- oder Modellannahme (docs/projekt/annahmen-und-datenluecken.md)
 #             offen      = noch nicht belegbar; wert ist null, die Simulation darf ihn nicht nutzen
 # Zeiten in Sekunden. Stand der MES-Werte: Snapshot 2026-11-09 15:57.
+#
+# Zeiten: Festwert = Median der gefilterten Schritte (Hauptvergleich). Für das Szenario
+# "unsicherheit" gibt es zu jedem Zeitparameter mit Verteilung eine empirische Verteilung unter
+# demselben Parameterpfad: matsim.daten.zeiten.verteilung("kommissionierplatz.pickzeit_je_teil_s")
+# liefert ein Objekt mit .ziehe(rng). Erzeugt mit "python -m matsim.daten zeiten".
 schema_version: 1
 zeiteinheit: s
+zeitverteilungen:
+  wert: data/processed/zeitverteilungen.json
+  herkunft: abgeleitet
+  beleg: "matsim.daten.zeiten.leite_verteilungen_ab, Snapshot 15:57; Störungen entfernt (datenmodell-mes.md, Abschnitt 6)"
 
 teile:
   800: IoT main PCB
@@ -70,19 +79,27 @@ materiallager:
 
 kommissionierplatz:
   resource_id: {wert: 19, herkunft: mes, beleg: "tblresource: CP-PICKSORT"}
-  gleichzeitige_chargen: {wert: 1, herkunft: annahme, beleg: "A-04: am 09.11.2026 liefen die Kommissionieraufträge nacheinander"}
-  pickzeit_je_teil_s: {wert: 23, herkunft: abgeleitet, beleg: "Median OpNo 220 an Ressource 19, n = 748, q10/q90 = 21/25 s (B-13)"}
+  gleichzeitige_chargen: {wert: 1, herkunft: abgeleitet, beleg: "229 Kommissionieraufträge 11.06.2025 bis 09.11.2026, kein überlappendes Paar (zeiten.kommissionier_ueberlappungen, A-04)"}
+  pickzeit_je_teil_s: {wert: 23, herkunft: abgeleitet, beleg: "Median OpNo 220 an Ressource 19, n = 748, q10/q90 = 21/25 s (B-13); Verteilung ohne 26 Störungen über 46 s"}
   pickzeit_stammdaten_s: {wert: 20, herkunft: mes, beleg: "tblresourceoperation 19/220 WorkingTime"}
 
 fahrzeuge:
   anzahl_stammdaten: {wert: 6, herkunft: mes, beleg: "tblresource 20-25 LOG-MR-B"}
-  anzahl: {wert: 2, herkunft: annahme, beleg: "A-05: am Nachmittag des 09.11.2026 meldeten nur die Ressourcen 24 und 25 (tblmachinereport)"}
+  anzahl: {wert: 2, herkunft: annahme, beleg: "A-05: seit 03.11.2026 melden nur die Robotinos 24 und 25 Busy-Abschnitte, höchstens 2 gleichzeitig (tblmachinereport, B-22); an früheren Tagen 1 bis 6 aktiv und bis zu 6 gleichzeitig; mehr Fahrzeuge nur als Sensitivität"}
   boxplaetze_je_fahrzeug: {wert: 1, herkunft: mes, beleg: "tblbuffer 20-25: storage 1x1"}
   hintransport_s:
     wert: 130
     herkunft: abgeleitet
-    beleg: "Median Ende letzter Pick bis Ende erster OpNo 215, n = 229; enthält Wartezeiten, keine reine Fahrzeit (B-14, L-03)"
-  leerboxruecktransport_s: {wert: null, herkunft: offen, beleg: "L-03: Robotino-Fahrten stehen nicht in tblfinstep"}
+    beleg: "Median Ende letzter Pick bis Ende erster OpNo 215, n = 229; enthält Warten auf ein Fahrzeug. Nur verwenden, wenn Fahrzeuge nicht als Ressource modelliert sind (A-07)"
+  # Mit Fahrzeugen als Ressource: Fahrauftrag statt hintransport_s, das Warten entsteht im Modell.
+  fahrauftrag_s:
+    wert: 96
+    herkunft: abgeleitet
+    beleg: "Median (nach Entfernen einer Störung) Aufnahme an der Kommissionierung, Fahrt und Übergabe bis Start OpNo 215, aus Busy-Abschnitten in tblmachinereport, n = 170 von 229 zuordenbar, q10/q90 = 68/143 s (B-22, L-03); am 09.11.2026: 109, 113, 109 s"
+  leerboxruecktransport_s:
+    wert: 96
+    herkunft: annahme
+    beleg: "A-09: wie fahrauftrag_s (gleiche Strecke Station - Lager, gleiche Übergaben); Rückfahrten sind weder in tblfinstep noch eindeutig in tblmachinereport erkennbar (L-03)"
 
 stationen:
   RASS1:
@@ -92,7 +109,12 @@ stationen:
       800: {wert: 1, herkunft: mes, beleg: "tblstepdef 1000/30 OpNo 323, Parameter 3 = 800"}
       814: {wert: 1, herkunft: mes, beleg: "tblstepdef 1000/60 OpNo 323, Parameter 3 = 814"}
     zulaessige_teile: {wert: [800, 814], herkunft: mes, beleg: "tblpnogroup 5 'RASS1 material'; Auswahlliste WPNo 1, Schritt 10, Parameter 11"}
-    montagezeit_je_teil_s: {wert: 37, herkunft: abgeleitet, beleg: "Median OpNo 323 an Ressource 2, n = 236"}
+    montagezeit_je_teil_s: {wert: 37, herkunft: abgeleitet, beleg: "Median OpNo 323 an Ressource 2, n = 236; Median über beide Teile, für die Simulation montagezeit_s je Teil verwenden"}
+    # Zweigipflig je Satz: das erste Teil dauert länger als das zweite (datenmodell-mes.md, Abschnitt 6).
+    montagezeit_s:
+      800: {wert: 39, herkunft: abgeleitet, beleg: "Median OpNo 323 mit Teil 800 (erstes Teil des Satzes: Mainboard), n = 123, q10/q90 der Verteilung = 37/41 s"}
+      814: {wert: 28, herkunft: abgeleitet, beleg: "Median OpNo 323 mit Teil 814 (zweites Teil: Display), n = 113, q10/q90 der Verteilung = 25/29 s"}
+    belegung_je_werkstueck_s: {wert: 136, herkunft: abgeleitet, beleg: "Median erster Start bis letztes Ende je Werkstück WPNo 1000 an der Station (Abdeckung, Montage, Ablegen), n = 87, q10/q90 der Verteilung = 133/148 s; Station ist so lange belegt"}
   RASS2:
     resource_id: {wert: 4, herkunft: mes, beleg: "tblresource: CP-F-RASS-2"}
     uebergabeplaetze: {wert: 2, herkunft: mes, beleg: "tblbuffer 4/1 Box 1x2"}
@@ -100,14 +122,22 @@ stationen:
       813: {wert: 1, herkunft: mes, beleg: "tblstepdef 1000/100 OpNo 324, Parameter 4 = 813"}
       811: {wert: 1, herkunft: mes, beleg: "tblstepdef 1000/110 OpNo 324, Parameter 4 = 811"}
     zulaessige_teile: {wert: [811, 812, 813], herkunft: mes, beleg: "tblpnogroup 6 'RASS2 material'; Auswahlliste WPNo 2"}
-    montagezeit_je_teil_s: {wert: 39, herkunft: abgeleitet, beleg: "Median OpNo 324 an Ressource 4, n = 213"}
+    montagezeit_je_teil_s: {wert: 39, herkunft: abgeleitet, beleg: "Median OpNo 324 an Ressource 4, n = 213; Median über beide Teile, für die Simulation montagezeit_s je Teil verwenden"}
+    # Zweigipflig je Satz: das erste Teil dauert länger als das zweite (datenmodell-mes.md, Abschnitt 6).
+    montagezeit_s:
+      813: {wert: 40, herkunft: abgeleitet, beleg: "Median OpNo 324 mit Teil 813 (erstes Teil des Satzes: Analog-Platine), n = 100, q10/q90 der Verteilung = 39/40 s"}
+      811: {wert: 25, herkunft: abgeleitet, beleg: "Median OpNo 324 mit Teil 811 (zweites Teil: Gyroskop), n = 103, q10/q90 der Verteilung = 24/25 s"}
+    belegung_je_werkstueck_s: {wert: 121, herkunft: abgeleitet, beleg: "Median erster Start bis letztes Ende je Werkstück WPNo 1000 an der Station (Abdeckung, Montage, Ablegen), n = 87, q10/q90 der Verteilung = 120/122 s; Station ist so lange belegt"}
   RASS3:
     resource_id: {wert: 6, herkunft: mes, beleg: "tblresource: CP-F-RASS-3"}
     uebergabeplaetze: {wert: 2, herkunft: mes, beleg: "tblbuffer 6/1 Box 1x2"}
     materialsatz:
       831: {wert: 1, herkunft: mes, beleg: "tblstepdef 1000/160 OpNo 325, Parameter 3 = 831"}
     zulaessige_teile: {wert: [831, 832, 833, 834], herkunft: mes, beleg: "tblpnogroup 12 'RASS3 material'; Auswahlliste WPNo 3"}
-    montagezeit_je_teil_s: {wert: 24, herkunft: abgeleitet, beleg: "Median OpNo 325 an Ressource 6, n = 123"}
+    montagezeit_je_teil_s: {wert: 24, herkunft: abgeleitet, beleg: "Median OpNo 325 an Ressource 6, n = 123; gleich montagezeit_s.831"}
+    montagezeit_s:
+      831: {wert: 24, herkunft: abgeleitet, beleg: "Median OpNo 325 mit Teil 831 (Frontabdeckung), n = 118, q10/q90 der Verteilung = 23/26 s"}
+    belegung_je_werkstueck_s: {wert: 63, herkunft: abgeleitet, beleg: "Median erster Start bis letztes Ende je Werkstück WPNo 1000 an der Station (Abdeckung, Montage, Ablegen), n = 86, q10/q90 der Verteilung = 61/66 s; Station ist so lange belegt"}
 
 werkstueckumlauf:
   # Bandtopologie laut tbltopology: Stationsfolge der inneren Schleife.
@@ -115,5 +145,6 @@ werkstueckumlauf:
   auslagern_s: {wert: 16, herkunft: abgeleitet, beleg: "Median OpNo 212 an Ressource 1, n = 132"}
   einlagern_s: {wert: 15, herkunft: abgeleitet, beleg: "Median OpNo 211 an Ressource 1, n = 145"}
   weiterfahrt_bei_materialmangel: {wert: true, herkunft: annahme, beleg: "A-01: Aufgabenstellung Team C 'Fehlt Material, fährt das Werkstück weiter'; Referenzpaket fehlt"}
-  umlaufzeit_s: {wert: null, herkunft: offen, beleg: "L-02: Bandlaufzeiten sind in den MES-Daten nicht aufgezeichnet"}
+  bandsegment_s: {wert: 14, herkunft: abgeleitet, beleg: "Median Ende Schritt an RASS1/2/3 bis Start an der Folgestation 3/5/7 desselben Werkstücks, n = 319, q10/q90 = 13/15 s"}
+  umlaufzeit_s: {wert: 140, herkunft: annahme, beleg: "A-10: 10 Bandsegmente der inneren Schleife zu je 14 s (bandsegment_s); nur 3 der 10 Segmente sind ohne Wartezeit messbar (L-02)"}
   wiederkehrregel: {wert: null, herkunft: offen, beleg: "L-01: legt das Referenzpaket fest"}

@@ -21,9 +21,9 @@ def test_anlage_laedt_und_kennzeichnet_offene_parameter():
     anlage = lade_anlage()
     assert wert(anlage, "box.positionen") == 8
     assert wert(anlage, "stationen.RASS1.materialsatz.800") == 1
-    assert "werkstueckumlauf.umlaufzeit_s" in offene_parameter(anlage)
+    assert "werkstueckumlauf.wiederkehrregel" in offene_parameter(anlage)
     with pytest.raises(AnlagenFehler):
-        wert(anlage, "werkstueckumlauf.umlaufzeit_s")
+        wert(anlage, "werkstueckumlauf.wiederkehrregel")
 
 
 def test_szenarien_decken_versuchsplan_ab():

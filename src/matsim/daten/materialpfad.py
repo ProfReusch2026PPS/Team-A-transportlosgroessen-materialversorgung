@@ -108,15 +108,16 @@ class Ablieferung:
 
     ono: int
     station: int
-    start: datetime
-    ende: datetime
+    start: datetime  # erster Start OpNo 215: Box an der Station
+    erstes_ende: datetime  # erstes Ende OpNo 215
+    ende: datetime  # letztes Ende OpNo 215
     letzter_pick: datetime | None
 
 
 def ablieferungen(verbindung: sqlite3.Connection) -> list[Ablieferung]:
     """Je Kommissionierauftrag der erste Start und das letzte Ende von OpNo 215."""
     zeilen = verbindung.execute(
-        "SELECT s.ONo, s.ResourceID, MIN(s.Start), MAX(s.End), "
+        "SELECT s.ONo, s.ResourceID, MIN(s.Start), MIN(s.End), MAX(s.End), "
         "(SELECT MAX(k.End) FROM tblfinstep k WHERE k.ONo = s.ONo AND k.OpNo = ? "
         " AND k.End IS NOT NULL AND k.End <> '') "
         "FROM tblfinstep s WHERE s.OpNo = ? AND s.Start IS NOT NULL AND s.Start <> '' "
@@ -124,8 +125,8 @@ def ablieferungen(verbindung: sqlite3.Connection) -> list[Ablieferung]:
         (KOMMISSIONIER_OPNO, ABLIEFERUNG_OPNO),
     )
     return [
-        Ablieferung(ono, station, _zeit(start), _zeit(ende), _zeit(letzter))
-        for ono, station, start, ende, letzter in zeilen
+        Ablieferung(ono, station, _zeit(start), _zeit(erstes), _zeit(ende), _zeit(letzter))
+        for ono, station, start, erstes, ende, letzter in zeilen
     ]
 
 
@@ -271,3 +272,15 @@ def abgleich(
         for (box, platz), pno in tatsaechlich.items()
         if erwartet.get((box, platz), 0) != pno
     )
+
+
+def quellboxen_je_auftrag(verbindung: sqlite3.Connection) -> dict[int, int]:
+    """Anzahl verschiedener Quellboxen je Kommissionierauftrag.
+
+    Jede Quellbox muss vom Boxlager zur Kommissionierstation und zurück gefahren werden. Diese
+    Fahrten belegen dieselben Robotinos wie die Ablieferung der Zielbox.
+    """
+    quellen: dict[int, set[int]] = defaultdict(set)
+    for u in umsetzungen(verbindung):
+        quellen[u.ono].add(u.quellbox)
+    return {ono: len(boxen) for ono, boxen in sorted(quellen.items())}

@@ -91,6 +91,7 @@ Die Zahlen unten stammen aus dem Snapshot 15:57 und sind in `tests/test_qualitae
 | B-19 | Montagepriorität im MES | 1 Abfrage | 0 | 0,0 % | neu |
 | B-20 | Picks ohne Produktionsposition | 749 Picks | 176 | 23,5 % | neu |
 | B-21 | Nutzung der Boxen ohne Ort | 19 Boxen | 0 | 0,0 % | neu |
+| B-22 | Zuordnung der Ablieferungen zu Robotino-Fahraufträgen | 229 Ablieferungen | 40 | 17,5 % | neu |
 
 ### 4.2 Befunde im Einzelnen
 
@@ -176,7 +177,7 @@ Die Zahlen unten stammen aus dem Snapshot 15:57 und sind in `tests/test_qualitae
 - Ergebnis: Im Snapshot 15:57 ist `tblorder` leer, deshalb sind alle 31 Bindungen auffällig (100 %): 26 Zeilen `tblstepparameter` (ONo 1 und 7963) und 5 gebuchte Plätze an Ressource 19. Im Snapshot 15:16: 309 Bindungen, 30 auffällig (9,7 %).
 - Beispiel: 19/6/1 ist seit 21.10.2025 gebucht; Band 6 hat laut `tblbuffer` 0 Reihen und 0 Spalten und ist damit abgeschaltet.
 - Umgang: Gebucht ist immer Platz 1 eines Bandes; die Kennzeichen an Band 2 und 4 stehen seit 15:02:18 (Produktionsstart), an Band 6 seit 21.10.2025, und keines wird nach Produktionsende zurückgesetzt. Das Kennzeichen beschreibt die Belegung damit nicht verlässlich. Gleichzeitig standen an der Kommissionierstation bis zu drei Boxen (15:25: Zielbox 18 und Quellboxen 3 und 4). Gebuchte Plätze werden nicht ausgewertet (L-05).
-- Modellfolge: Kapazität des Kommissionierplatzes kommt aus der Historie (eine Charge zur Zeit, A-04), nicht aus den Buchungskennzeichen.
+- Modellfolge: Kapazität des Kommissionierplatzes kommt aus der Historie (eine Charge zur Zeit, Abschnitt 6.3), nicht aus den Buchungskennzeichen.
 
 **B-13 Filter der Zeitansätze**
 - Prüfung: Schritte der sechs Zeitvorgänge in `config/anlage.yaml` ohne Start oder Ende oder mit `ErrorRetVal <> 0` fließen nicht in die Zeiten ein (`b13_zeitfilter`).
@@ -186,11 +187,11 @@ Die Zahlen unten stammen aus dem Snapshot 15:57 und sind in `tests/test_qualitae
 - Modellfolge: Festwerte = Median der gefilterten Schritte (Abschnitt 6).
 
 **B-14 Ende letzter Pick bis Ablieferung**
-- Prüfung: Dauer vom Ende des letzten Picks bis zum Ende der Ablieferung (OpNo 215) je Kommissionierauftrag. Auffällig ist ein Wert über der äußeren Tukey-Grenze Q3 + 3 · IQR (`b14_transportzeit`).
-- Ergebnis: 229 Aufträge, 21 über 378 s (9,2 %).
-- Beispiel: größte Werte 3 736 s, 6 886 s, 7 477 s.
-- Umgang: Der Median ist gegen diese Werte robust. Für Verteilungen werden sie als Störung entfernt (Issue #3).
-- Modellfolge: Kein reiner Fahrzeitwert, enthält Warten auf ein Fahrzeug (L-03).
+- Prüfung: Dauer vom Ende des letzten Picks bis zum Ende des ersten Ablieferschritts (OpNo 215) je Kommissionierauftrag. Auffällig ist ein Wert über der äußeren Tukey-Grenze Q3 + 3 · IQR (`b14_transportzeit`).
+- Ergebnis: 229 Aufträge, 21 über 380 s (9,2 %).
+- Beispiel: größte Werte 3 735 s, 6 886 s, 7 476 s.
+- Umgang: Der Median ist gegen diese Werte robust. In der Verteilung werden sie als Störung entfernt (Abschnitt 6.6).
+- Modellfolge: Kein reiner Fahrzeitwert, enthält Warten auf ein Fahrzeug. Zerlegung in Warten und Fahrauftrag in Abschnitt 6.4.
 
 **B-15 Positionen je Kommissionierauftrag**
 - Prüfung: Ein Auftrag für RASS1 oder RASS2 enthält eine gerade Teilezahl (ganze Sätze), kein Auftrag mehr als 8 Teile (`b15_buendelung`).
@@ -241,6 +242,13 @@ Die Zahlen unten stammen aus dem Snapshot 15:57 und sind in `tests/test_qualitae
 - Umgang: stützt die Annahme, dass diese Boxen außerhalb der Anlage sind (L-08).
 - Modellfolge: Boxen ohne Ort und ihre 15 Teile gehen nicht in den Basisfall (A-02, A-03).
 
+**B-22 Zuordnung der Ablieferungen zu Robotino-Fahraufträgen**
+- Prüfung: Jede Ablieferung (OpNo 215) lässt sich einem Busy-Abschnitt eines Robotinos in `tblmachinereport` zuordnen (`b22_fahrzeugzuordnung`, Regel in Abschnitt 6.4).
+- Ergebnis: 229 Ablieferungen, 40 nicht zuordenbar (17,5 %).
+- Beispiel: Am 09.11.2026 aktiv waren die Robotinos 24 und 25, höchstens 2 gleichzeitig beschäftigt; alle drei Ablieferungen des Tages passen zu den Snapshots.
+- Umgang: Fahrzeiten nur aus den zuordenbaren und vollständig verketteten Fahraufträgen (170).
+- Modellfolge: `fahrzeuge.fahrauftrag_s` = 96 s mit Verteilung; Fahrzeuganzahl 2 (A-05).
+
 ### 4.3 Stichprobe und Live-Zugriff
 
 - Stichprobe von Hand: Auftrag 9178 vom Auslagern bis zum Einlagern, mit Abgleich gegen alle sechs Snapshots, in [stichprobe-auftrag-9178.md](stichprobe-auftrag-9178.md). Wiederholbar mit `python -m matsim.daten stichprobe 9178`.
@@ -258,7 +266,9 @@ Eine Box mit Sätzen verschiedener Stationen wäre technisch befüllbar (alle Bo
 
 ## 6. Zeitansätze aus der Historie
 
-Zeitraum 11.06.2025 bis 09.11.2026, 552 abgeschlossene Aufträge. Dauer = `End` minus `Start` je Schritt. Nach [Kapitel 12](../12-smart-factory-mes-und-zielorientierte-prozessverbesserung.md), Abschnitt „Historische Istzeiten als Rückfluss“, werden Median und Quantile statt des Mittelwerts verwendet, weil einzelne Störungen den Mittelwert verzerren.
+Zeitraum 11.06.2025 bis 09.11.2026, 552 abgeschlossene Aufträge. Dauer = `End` minus `Start` je Schritt, Filter wie in B-13 (Start und Ende vorhanden, `ErrorRetVal = 0`). Nach [Kapitel 12](../12-smart-factory-mes-und-zielorientierte-prozessverbesserung.md), Abschnitt „Historische Istzeiten als Rückfluss“, werden Median und Quantile statt des Mittelwerts verwendet, weil einzelne Störungen den Mittelwert verzerren. Alle Werte erzeugt `python -m matsim.daten zeiten`; die Funktionen stehen in `src/matsim/daten/zeiten.py`, die Tests in `tests/test_zeiten.py`.
+
+### 6.1 Schrittdauern
 
 | Vorgang | Schritte gesamt | n nach Filter | Median | Mittel | q10 / q90 | Maximum |
 |---|---:|---:|---:|---:|---:|---:|
@@ -269,7 +279,89 @@ Zeitraum 11.06.2025 bis 09.11.2026, 552 abgeschlossene Aufträge. Dauer = `End` 
 | Auslagern ASRS32 (OpNo 212, Ressource 1) | 136 | 132 | 16 s | 15,9 s | 14 / 17 s | 19 s |
 | Einlagern ASRS32 (OpNo 211, Ressource 1) | 148 | 145 | 15 s | 14,8 s | 13 / 17 s | 19 s |
 
-Die Montagedauer je Teil ist bimodal (q10 = 25 s, Median 37 bis 39 s). Am 09.11.2026 dauerte das erste Teil eines Satzes rund 37 bis 40 s, das zweite rund 25 s. Ob das an der Operation oder am Teil liegt, klärt AP1.
+### 6.2 Zweigipflige Montagezeit: Sie hängt am Teil
+
+Die Montagezeit je Station ist zweigipflig, weil die beiden Teile eines Satzes unterschiedlich lange dauern. Ausgewertet je Teil über den Teile-Parameter des Montageschritts (`montagestatistik_je_teil`):
+
+| Station | Teil | Schritt in WPNo 1000 | n | Median | q10 / q90 |
+|---|---|---|---:|---:|---:|
+| RASS1 | 800 Mainboard | 30 (erstes Teil) | 123 | 39 s | 37 / 52 s |
+| RASS1 | 814 Display | 60 (zweites Teil) | 113 | 28 s | 25 / 31 s |
+| RASS2 | 813 Analog-Platine | 100 (erstes Teil) | 100 | 40 s | 39 / 40 s |
+| RASS2 | 811 Gyroskop | 110 (zweites Teil) | 103 | 25 s | 24 / 25 s |
+| RASS3 | 831 Frontabdeckung | 160 | 118 | 24 s | 23 / 27 s |
+
+Je Teil ist die Verteilung eingipflig und eng. Die Stichprobe 9178 bestätigt das (Mainboard 37 s, Display 27 s, Analog 40 s, Gyroskop 25 s). Ob der Unterschied am Teil oder an der Position im Ablauf liegt, lässt sich nicht trennen, weil in WPNo 1000 beides zusammenfällt. Für die Simulation ist das gleichgültig: `config/anlage.yaml` enthält `montagezeit_s` je Teil.
+
+Die Station ist je Werkstück deutlich länger belegt als die Montage dauert, weil Abdeckung auflegen (OpNo 320), bei RASS1 Einschalten und QR lesen und Ablegen auf das Band (OpNo 321) dazukommen (`stationsbelegung`, erster Start bis letztes Ende je Werkstück WPNo 1000): RASS1 136 s, RASS2 121 s, RASS3 63 s (n = 87, 87, 86).
+
+### 6.3 Kommissionierstation: nie zwei Aufträge gleichzeitig
+
+Geprüft für alle 229 Kommissionieraufträge der Historie: Der Zeitraum erster Pick-Start bis letztes Pick-Ende überlappt bei keinem Paar (`kommissionier_ueberlappungen`). Auch Einzelschritte zweier Aufträge überlappen nie (749 Picks). Die Kommissionierstation bearbeitet also eine Charge zur Zeit (A-04 ist damit aus der Historie belegt). Die Buchungskennzeichen an Ressource 19 (B-12) widersprechen dem nicht, sie werden nur nicht zurückgesetzt.
+
+### 6.4 Fahrzeuge aus `tblmachinereport`
+
+`tblmachinereport` enthält für jeden Robotino (Ressourcen 20 bis 25) Meldungen mit `Busy = 1` oder `0`. Ein zusammenhängender Zeitraum mit `Busy = 1` ist ein einzelnes Kommando; zwischen zwei Kommandos desselben Fahrauftrags meldet das Fahrzeug rund 3 s `Busy = 0`. Ort und Box stehen nicht in der Meldung. Beispiel 09.11.2026, Robotino 25, Zielbox 11 für RASS1:
+
+| Zeit | Busy-Abschnitt | Deutung | Beleg aus den Snapshots |
+|---|---|---|---|
+| 15:16:10–15:16:25 | 15 s | Aufnahme an der Kommissionierung | 15:16: Box 11 auf 25/1/1, Zeitstempel 15:16:24 |
+| 15:16:28–15:17:25 | 57 s | Fahrt zu RASS1 | |
+| 15:17:28–15:17:49 | 21 s | Übergabe | 15:22: Box 11 auf 2/1/2, Zeitstempel 15:17:43; OpNo 215 ab 15:17:44 |
+
+**Zahl aktiver Fahrzeuge** (`aktive_fahrzeuge_je_tag`, `max_gleichzeitig_aktiv`): Seit 03.11.2026 melden nur die Robotinos 24 und 25 Busy-Abschnitte, höchstens 2 sind gleichzeitig beschäftigt. Davor waren an den 56 Tagen mit Ablieferungen 1 bis 6 Robotinos aktiv (an 20 Tagen genau 2); gleichzeitig beschäftigt waren an 25 Tagen höchstens 2, an 19 Tagen 3 und an 12 Tagen 4 bis 6. Für den Stand der Anlage im November 2026 stützt das A-05 (2 Fahrzeuge im Basisfall); mehr Fahrzeuge sind eine Variante für die Sensitivität.
+
+**Fahrzeiten** (`transportzerlegung`): Jede Ablieferung (Start OpNo 215) wird dem Busy-Abschnitt eines Robotinos zugeordnet, der den Ablieferstart enthält (sonst dem mit dem nächstgelegenen Ende). Von dort werden vorausgehende Abschnitte desselben Fahrzeugs mit höchstens 6 s Lücke zu einem Fahrauftrag verkettet. Damit zerfällt „Ende letzter Pick bis Ablieferung“ (B-14) in
+
+- **Warten auf ein Fahrzeug:** Ende letzter Pick bis Beginn des Fahrauftrags, Median 15 s, q10/q90 = 8 / 192 s;
+- **Fahrauftrag:** Aufnahme, Fahrt und Übergabe, Median 96 s, q10/q90 = 68 / 143 s.
+
+Zuordenbar sind 189 von 229 Ablieferungen; 40 nicht, weil kein passender Abschnitt existiert oder die Kette vor dem letzten Pick beginnen müsste (B-22). Von den 189 werden 19 nicht als Fahrzeit verwendet, weil die Kette nach einer Pause von mehr als 6 s abbricht und der Fahrauftrag dann unter dem halben Median liegt (bis hinunter zu 2 s, `vollstaendige_fahrauftraege`). Die Zuordnung ist eine Heuristik. Am 09.11.2026 stimmt sie für alle drei Ablieferungen mit den Snapshots überein (9177 und 9179: Robotino 25, 9180: Robotino 24); 9177 wartete 81 s, weil Robotino 25 noch Quellboxen fuhr.
+
+**Weitere Fahrzeuglast:** Dieselben Robotinos fahren auch die Quellboxen vom Boxlager zur Kommissionierung und zurück. Ein Kommissionierauftrag braucht 1 bis 5 Quellboxen (87-mal 1, 107-mal 2, 20-mal 3, 12-mal 4, 3-mal 5; am 09.11.2026: 3, 4 und 3; `materialpfad.quellboxen_je_auftrag`). Diese Fahrten stehen nicht in der Schritthistorie.
+
+**Rückfahrt der Leerbox:** weder in `tblfinstep` noch eindeutig in `tblmachinereport` erkennbar, weil keine Operation die Rückkehr der Box ins Lager markiert. Annahme A-09: gleich lang wie der Fahrauftrag (96 s).
+
+### 6.5 Werkstückumlauf
+
+Bandlaufzeiten sind nicht aufgezeichnet (L-02). Messbar ist die Zeit zwischen Ende eines Schritts und Start des nächsten Schritts desselben Werkstücks an der Nachbarstation, aber nur dort ohne Wartezeit, wo die Folgestation kein Material braucht: RASS1 → Messen (3), RASS2 → Kamera (5), RASS3 → Funktionstest (7). Median 14 s, q10/q90 = 13 / 15 s, n = 319 (`bandsegmentdauern`). Die übrigen Segmente enthalten Warten auf Material (z. B. Messen → RASS2: Median 389 s, q10 16 s). Annahme A-10: Umlaufzeit = 10 Segmente der inneren Schleife × 14 s = 140 s.
+
+### 6.6 Festwerte und Verteilungen
+
+Im Hauptvergleich gelten Festwerte (Median). Für das Szenario `unsicherheit` liegt zu jedem Zeitparameter eine empirische Verteilung vor, unter demselben Pfad wie in `config/anlage.yaml`:
+
+```python
+import random
+from matsim.daten.zeiten import verteilung
+
+rng = random.Random(seed)
+pickzeit = verteilung("kommissionierplatz.pickzeit_je_teil_s").ziehe(rng)
+```
+
+Die Verteilungen liegen versioniert in `data/processed/zeitverteilungen.json` und sind ohne Dumps nutzbar.
+
+**Warum empirisch:** Gezogen wird mit Zurücklegen aus den beobachteten Dauern. So muss keine Verteilungsfamilie unterstellt werden, Schiefe und Diskretisierung auf ganze Sekunden bleiben erhalten, und die Stichproben sind mit 100 bis 750 Werten je Vorgang groß genug.
+
+**Ausreißer:** Eine Dauer gilt als Störung (Stillstand, Eingriff, abgebrochener Schritt) und wird entfernt, wenn sie außerhalb der äußeren Tukey-Grenzen Q1 − 3·IQR bzw. Q3 + 3·IQR liegt **und** mehr als doppelt so lang bzw. weniger als halb so lang wie der Median ist (`stoerungsgrenzen`). Die zweite Bedingung verhindert, dass bei sehr engen Verteilungen (Gyroskop: Q1 = Q3 = 25 s) schon 26 s als Störung zählen. Störungen sind nicht Teil des Modells; ihr Anteil steht je Verteilung in der Tabelle.
+
+| Parameter in `config/anlage.yaml` | Festwert | n roh | als Störung entfernt | Verteilung Median | q10 / q90 |
+|---|---:|---:|---:|---:|---:|
+| `kommissionierplatz.pickzeit_je_teil_s` | 23 s | 748 | 26 (über 46 s) | 22 s | 21 / 25 s |
+| `fahrzeuge.hintransport_s` | 130 s | 229 | 21 (über 380 s) | 121 s | 85 / 202 s |
+| `fahrzeuge.fahrauftrag_s` | 96 s | 170 | 1 | 96 s | 68 / 143 s |
+| `stationen.RASS1.montagezeit_s.800` | 39 s | 123 | 11 | 39 s | 37 / 41 s |
+| `stationen.RASS1.montagezeit_s.814` | 28 s | 113 | 4 | 28 s | 25 / 29 s |
+| `stationen.RASS2.montagezeit_s.813` | 40 s | 100 | 4 | 40 s | 39 / 40 s |
+| `stationen.RASS2.montagezeit_s.811` | 25 s | 103 | 5 | 25 s | 24 / 25 s |
+| `stationen.RASS3.montagezeit_s.831` | 24 s | 118 | 4 | 24 s | 23 / 26 s |
+| `stationen.RASS1.belegung_je_werkstueck_s` | 136 s | 87 | 16 | 135 s | 133 / 148 s |
+| `stationen.RASS2.belegung_je_werkstueck_s` | 121 s | 87 | 4 | 121 s | 120 / 122 s |
+| `stationen.RASS3.belegung_je_werkstueck_s` | 63 s | 86 | 6 | 62,5 s | 61 / 66 s |
+| `werkstueckumlauf.auslagern_s` | 16 s | 132 | 0 | 16 s | 14 / 17 s |
+| `werkstueckumlauf.einlagern_s` | 15 s | 145 | 0 | 15 s | 13 / 17 s |
+| `werkstueckumlauf.bandsegment_s` | 14 s | 319 | 41 (über 28 s) | 14 s | 13 / 15 s |
+
+`fahrzeuge.hintransport_s` enthält das Warten auf ein Fahrzeug. Wer Fahrzeuge in der Simulation als Ressource modelliert, nimmt `fahrauftrag_s`; sonst wird das Warten doppelt gezählt (A-07).
 
 ## 7. Bestand je Snapshot
 

@@ -8,6 +8,7 @@ Beispiele::
     python -m matsim.daten abgleich 2026-11-09_1516 2026-11-09_1522
     python -m matsim.daten qualitaet
     python -m matsim.daten stichprobe 9178
+    python -m matsim.daten zeiten
     python -m matsim.daten live-vergleich 2026-11-09_1557
 """
 
@@ -18,8 +19,15 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from matsim.daten import bestand, dump_import, materialpfad, qualitaet, snapshot_vergleich
-from matsim.pfade import INTERIM, ROH_SNAPSHOTS
+from matsim.daten import (
+    bestand,
+    dump_import,
+    materialpfad,
+    qualitaet,
+    snapshot_vergleich,
+    zeiten,
+)
+from matsim.pfade import INTERIM, PROCESSED, ROH_SNAPSHOTS
 
 LETZTER_SNAPSHOT = "2026-11-09_1557"
 
@@ -114,6 +122,27 @@ def _stichprobe(argumente: argparse.Namespace) -> None:
         verbindung.close()
 
 
+def _zeiten(argumente: argparse.Namespace) -> None:
+    verbindung = sqlite3.connect(_sqlite_pfad(argumente.snapshot))
+    try:
+        verteilungen = zeiten.leite_verteilungen_ab(verbindung)
+        ziel = PROCESSED / zeiten.VERTEILUNGSDATEI
+        zeiten.speichere_verteilungen(verteilungen, ziel)
+        print(f"{ziel} geschrieben")
+        print(f"{'Verteilung':<42}{'n roh':>7}{'entfernt':>9}{'Median':>8}{'q10':>7}{'q90':>7}")
+        for name, v in verteilungen.items():
+            print(f"{name:<42}{v.n_roh:>7}{v.entfernt:>9}{v.median:>8g}{v.q10:>7g}{v.q90:>7g}")
+        anzahl, paare = zeiten.kommissionier_ueberlappungen(verbindung)
+        print(f"Kommissionierung: {anzahl} Aufträge, {len(paare)} überlappende Paare")
+        zerlegt, ohne = zeiten.transportzerlegung(verbindung)
+        print(f"Ablieferungen einem Robotino zugeordnet: {len(zerlegt)}, nicht zuordenbar: {ohne}")
+        for tag, fahrzeuge in list(zeiten.aktive_fahrzeuge_je_tag(verbindung).items())[-5:]:
+            gleichzeitig = zeiten.max_gleichzeitig_aktiv(verbindung, tag)
+            print(f"  {tag}: aktiv {fahrzeuge}, höchstens {gleichzeitig} gleichzeitig")
+    finally:
+        verbindung.close()
+
+
 def _live_vergleich(argumente: argparse.Namespace) -> None:
     from matsim.daten import live
 
@@ -155,6 +184,11 @@ def main() -> None:
     stichprobe.add_argument("ono", type=int)
     stichprobe.add_argument("--snapshot", default=LETZTER_SNAPSHOT)
     stichprobe.set_defaults(funktion=_stichprobe)
+    zeitbefehl = befehle.add_parser(
+        "zeiten", help="Zeitverteilungen ableiten und nach data/processed/ schreiben"
+    )
+    zeitbefehl.add_argument("snapshot", nargs="?", default=LETZTER_SNAPSHOT)
+    zeitbefehl.set_defaults(funktion=_zeiten)
     live_befehl = befehle.add_parser(
         "live-vergleich", help="Zeilenzahlen live (nur lesend, Labornetz) gegen einen Snapshot"
     )
