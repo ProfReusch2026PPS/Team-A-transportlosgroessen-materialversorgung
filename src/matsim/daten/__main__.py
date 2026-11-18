@@ -5,6 +5,7 @@ Beispiele::
     python -m matsim.daten importiere
     python -m matsim.daten vergleiche 2026-11-09_1516 2026-11-09_1557
     python -m matsim.daten bestand 2026-11-09_1516
+    python -m matsim.daten abgleich 2026-11-09_1516 2026-11-09_1522
     python -m matsim.daten qualitaet
     python -m matsim.daten stichprobe 9178
     python -m matsim.daten live-vergleich 2026-11-09_1557
@@ -41,7 +42,9 @@ def _importiere(_: argparse.Namespace) -> None:
 
 
 def _vergleiche(argumente: argparse.Namespace) -> None:
-    differenzen = snapshot_vergleich.vergleiche(_sqlite_pfad(argumente.a), _sqlite_pfad(argumente.b))
+    differenzen = snapshot_vergleich.vergleiche(
+        _sqlite_pfad(argumente.a), _sqlite_pfad(argumente.b)
+    )
     print(f"{'Tabelle':<26}{'Zeilen A':>10}{'Zeilen B':>10}{'nur A':>8}{'nur B':>8}")
     for d in differenzen:
         if d.veraendert or argumente.alle:
@@ -59,8 +62,34 @@ def _bestand(argumente: argparse.Namespace) -> None:
         doppelt = {box: orte for box, orte in standorte.items() if len(orte) > 1}
         print(f"Verortete Boxen: {len(standorte)}; doppelt verortet: {doppelt}")
         print("Bindungen ohne Auftrag:", bestand.reservierungen_ohne_auftrag(verbindung))
+        start = bestand.startbestand(verbindung)
+        print("Startbestand frei (verortet, im Kreislauf):", start.teile_frei)
+        print("Teile in Boxen ohne Ort:", start.teile_ohne_ort)
+        print(
+            f"Boxen: {start.boxen_stammdaten} laut Stammdaten, {len(start.boxen_verortet)} "
+            f"verortet, leer im Kreislauf {start.leere_boxen}, "
+            f"leer am Handarbeitsplatz {start.leere_boxen_ausserhalb}"
+        )
     finally:
         verbindung.close()
+
+
+def _abgleich(argumente: argparse.Namespace) -> None:
+    a = sqlite3.connect(_sqlite_pfad(argumente.a))
+    b = sqlite3.connect(_sqlite_pfad(argumente.b))
+    historie = sqlite3.connect(_sqlite_pfad(argumente.historie))
+    try:
+        abweichungen = materialpfad.abgleich(a, b, historie)
+        print(
+            f"Export A ~ {materialpfad.exportzeit(a):%H:%M:%S}, "
+            f"Export B ~ {materialpfad.exportzeit(b):%H:%M:%S}"
+        )
+        print(f"Abweichende Boxplätze (Box, Platz, erwartet, in B): {len(abweichungen)}")
+        for zeile in abweichungen:
+            print("  ", zeile)
+    finally:
+        for verbindung in (a, b, historie):
+            verbindung.close()
 
 
 def _qualitaet(argumente: argparse.Namespace) -> None:
@@ -112,6 +141,13 @@ def main() -> None:
     bestandsbefehl = befehle.add_parser("bestand", help="Teile-, Box- und Reservierungsbestand")
     bestandsbefehl.add_argument("snapshot")
     bestandsbefehl.set_defaults(funktion=_bestand)
+    abgleichbefehl = befehle.add_parser(
+        "abgleich", help="Boxinhalt von A mit Picks und Montagen fortschreiben, mit B vergleichen"
+    )
+    abgleichbefehl.add_argument("a")
+    abgleichbefehl.add_argument("b")
+    abgleichbefehl.add_argument("--historie", default=LETZTER_SNAPSHOT)
+    abgleichbefehl.set_defaults(funktion=_abgleich)
     qualitaetsbefehl = befehle.add_parser("qualitaet", help="Prüfungen zum Befundregister")
     qualitaetsbefehl.add_argument("snapshot", nargs="?", default=LETZTER_SNAPSHOT)
     qualitaetsbefehl.set_defaults(funktion=_qualitaet)

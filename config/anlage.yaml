@@ -23,27 +23,50 @@ teile:
 box:
   typ_pno: {wert: 29, herkunft: mes, beleg: "tblboxdef.BoxPNo"}
   positionen: {wert: 8, herkunft: mes, beleg: "tblboxdef.PosCount = 8, RowCount = 4"}
+  # Boxbestand nur aus tblbufferpos, jede Box einmal (doppelt verortete Box 11 über den jüngsten
+  # Zeitstempel aufgelöst, B-11). Funktion: matsim.daten.bestand.startbestand, Snapshot 15:57.
+  # 21 verortete Boxen = 7 leere Transportboxen + 13 Quellboxen mit Teilen + Box 38 an AASS1.
   anzahl_stammdaten: {wert: 40, herkunft: mes, beleg: "tblboxdef.Count; tblbox hat 40 Zeilen"}
   anzahl_verortet: {wert: 21, herkunft: abgeleitet, beleg: "distinct tblbufferpos.BoxID > 0, in allen 6 Snapshots 21 (B-09)"}
+  anzahl_ohne_ort:
+    wert: 19
+    herkunft: abgeleitet
+    beleg: "nicht in tblbufferpos, in allen 6 Snapshots gleich; seit 30.10.2026 nicht kommissioniert, 5 nie (B-21); gehen nicht in die Simulation (A-03, L-08)"
   transportboxen_frei:
     wert: 7
     herkunft: abgeleitet
-    beleg: "leere verortete Boxen im Snapshot 15:57 ohne Box 38 am AASS1-Cache; als Boxbestand zu bestätigen (A-03)"
+    beleg: "leere verortete Boxen 2, 4, 11, 15, 18, 34, 39 im Snapshot 15:57; ohne Box 38 am Handarbeitsplatz AASS1 (seit 12.03.2026 nicht kommissioniert) (A-03)"
+  quellboxen_mit_teilen:
+    wert: 13
+    herkunft: abgeleitet
+    beleg: "verortete Boxen mit freien Teilen im Lager 17, Snapshot 15:57; ihr Inhalt ist materiallager.anfangsbestand"
 
 materiallager:
   resource_id: {wert: 17, herkunft: mes, beleg: "tblresource: CP-F-ASRS20-B, tblbuffer 17/1 Storage 4x5"}
   lagerplaetze: {wert: 20, herkunft: mes, beleg: "tblbufferpos ResourceId 17, BufNo 1: 20 Zeilen"}
-  # Anfangsbestand je Teil: nur Teile in verorteten Boxen (B-10). Snapshot 15:57, alles frei.
+  # Anfangsbestand je Teil (A-02): freie Teile (ONo = 0) in verorteten Boxen im Kreislauf,
+  # Snapshot 15:57. Grund für 15:57: Ruhezustand nach Produktionsende, keine Reservierungen,
+  # keine Box unterwegs. Reservierungen sind kein zusätzlicher Bestand. Funktion:
+  # matsim.daten.bestand.startbestand. Achtung: reicht für 4 vollständige Produkte (L-11).
   anfangsbestand:
-    800: {wert: 4, herkunft: abgeleitet, beleg: "tblboxpos in verorteten Boxen; weitere 5 in nicht verorteten Boxen"}
-    811: {wert: 5, herkunft: abgeleitet, beleg: "tblboxpos in verorteten Boxen"}
-    812: {wert: 9, herkunft: abgeleitet, beleg: "tblboxpos in verorteten Boxen"}
-    813: {wert: 5, herkunft: abgeleitet, beleg: "tblboxpos in verorteten Boxen"}
-    814: {wert: 4, herkunft: abgeleitet, beleg: "tblboxpos in verorteten Boxen; weitere 9 in nicht verorteten Boxen"}
-    831: {wert: 5, herkunft: abgeleitet, beleg: "tblboxpos in verorteten Boxen"}
-    832: {wert: 8, herkunft: abgeleitet, beleg: "tblboxpos in verorteten Boxen; 1 weiteres in nicht verorteter Box"}
-    833: {wert: 7, herkunft: abgeleitet, beleg: "tblboxpos in verorteten Boxen"}
-    834: {wert: 9, herkunft: abgeleitet, beleg: "tblboxpos in verorteten Boxen"}
+    800: {wert: 4, herkunft: abgeleitet, beleg: "tblboxpos, verortete Boxen, Snapshot 15:57; weitere 5 in Boxen ohne Ort"}
+    811: {wert: 5, herkunft: abgeleitet, beleg: "tblboxpos, verortete Boxen, Snapshot 15:57"}
+    812: {wert: 9, herkunft: abgeleitet, beleg: "tblboxpos, verortete Boxen, Snapshot 15:57"}
+    813: {wert: 5, herkunft: abgeleitet, beleg: "tblboxpos, verortete Boxen, Snapshot 15:57"}
+    814: {wert: 4, herkunft: abgeleitet, beleg: "tblboxpos, verortete Boxen, Snapshot 15:57; weitere 9 in Boxen ohne Ort"}
+    831: {wert: 5, herkunft: abgeleitet, beleg: "tblboxpos, verortete Boxen, Snapshot 15:57"}
+    832: {wert: 8, herkunft: abgeleitet, beleg: "tblboxpos, verortete Boxen, Snapshot 15:57; 1 weiteres in Box ohne Ort"}
+    833: {wert: 7, herkunft: abgeleitet, beleg: "tblboxpos, verortete Boxen, Snapshot 15:57"}
+    834: {wert: 9, herkunft: abgeleitet, beleg: "tblboxpos, verortete Boxen, Snapshot 15:57"}
+  # Nur für die Sensitivitätsanalyse (A-02): Teile in Boxen ohne Ort, nicht im Basisfall.
+  bestand_ohne_ort:
+    800: {wert: 5, herkunft: abgeleitet, beleg: "tblboxpos, Boxen 14 und 23 ohne Ort (B-10)"}
+    814: {wert: 9, herkunft: abgeleitet, beleg: "tblboxpos, Boxen 1 und 14 ohne Ort (B-10)"}
+    832: {wert: 1, herkunft: abgeleitet, beleg: "tblboxpos, Box 19 ohne Ort (B-10)"}
+  vollstaendige_produkte_aus_anfangsbestand:
+    wert: 4
+    herkunft: abgeleitet
+    beleg: "Minimum über die Sätze von WPNo 1000: RASS1 min(800: 4, 814: 4) = 4, RASS2 min(813: 5, 811: 5) = 5, RASS3 831: 5 (L-11)"
 
 kommissionierplatz:
   resource_id: {wert: 19, herkunft: mes, beleg: "tblresource: CP-PICKSORT"}

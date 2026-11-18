@@ -192,3 +192,82 @@ def umsetzungen_ohne_produktionsposition(verbindung: sqlite3.Connection) -> list
     """Picks, deren Produktionsbezug (Parameter 8/9) in ``tblfinorderpos`` fehlt."""
     positionen = set(verbindung.execute("SELECT ONo, OPos FROM tblfinorderpos").fetchall())
     return [u for u in umsetzungen(verbindung) if (u.prod_ono, u.prod_opos) not in positionen]
+
+
+def exportzeit(verbindung: sqlite3.Connection) -> datetime:
+    """Schätzt den Exportzeitpunkt eines Snapshots als jüngsten Zeitstempel darin.
+
+    Herangezogen werden Maschinenmeldungen, Pufferbelegung und laufende sowie abgeschlossene
+    Schritte. Der echte Export liegt kurz danach.
+    """
+    abfragen = (
+        "SELECT MAX(TimeStamp) FROM tblmachinereport",
+        "SELECT MAX(TimeStamp) FROM tblbufferpos",
+        "SELECT MAX(End) FROM tblfinstep WHERE End <> ''",
+        "SELECT MAX(Start) FROM tblstep WHERE Start <> ''",
+        "SELECT MAX(End) FROM tblstep WHERE End <> ''",
+    )
+    werte = [verbindung.execute(sql).fetchone()[0] for sql in abfragen]
+    return max(_zeit(w) for w in werte if w)
+
+
+def boxinhalt(verbindung: sqlite3.Connection) -> dict[tuple[int, int], int]:
+    """Physischer Inhalt ``(BoxId, BoxPos) -> PNo`` aller Boxplätze (0 = leer)."""
+    return {
+        (box, platz): pno
+        for box, platz, pno in verbindung.execute("SELECT BoxId, BoxPos, PNo FROM tblboxpos")
+    }
+
+
+def fortschreiben(
+    inhalt: dict[tuple[int, int], int],
+    historie: sqlite3.Connection,
+    von: datetime,
+    bis: datetime,
+) -> dict[tuple[int, int], int]:
+    """Schreibt einen Boxinhalt mit den Picks und Montagen aus ``(von, bis]`` fort.
+
+    Ein Pick leert den Quellplatz und belegt den Zielplatz mit dem Teil. Eine Montage leert den
+    Zielplatz des Picks, der für genau diesen Auftrag, diese Position und diesen Schritt
+    umgesetzt hat. ``historie`` muss die Schritte des Zeitraums in ``tblfinstep`` enthalten
+    (also ein späterer Snapshot sein).
+    """
+    ergebnis = dict(inhalt)
+    picks = umsetzungen(historie)
+    ziel_je_schritt = {(u.prod_ono, u.prod_opos, u.prod_stepno): u for u in picks}
+    ereignisse: list[tuple[datetime, int, Umsetzung]] = [
+        (u.ende, 0, u) for u in picks if u.ende is not None and von < u.ende <= bis
+    ]
+    for ono, opos, stepno, ende in historie.execute(
+        "SELECT ONo, OPos, StepNo, End FROM tblfinstep WHERE OpNo IN (323, 324, 325) "
+        "AND End IS NOT NULL AND End <> ''"
+    ):
+        zeitpunkt = _zeit(ende)
+        pick = ziel_je_schritt.get((ono, opos, stepno))
+        if pick is not None and von < zeitpunkt <= bis:
+            ereignisse.append((zeitpunkt, 1, pick))
+    for _, art, u in sorted(ereignisse, key=lambda e: (e[0], e[1])):
+        if art == 0:
+            ergebnis[(u.quellbox, u.quellplatz)] = 0
+            ergebnis[(u.zielbox, u.zielplatz)] = u.pno
+        else:
+            ergebnis[(u.zielbox, u.zielplatz)] = 0
+    return ergebnis
+
+
+def abgleich(
+    a: sqlite3.Connection, b: sqlite3.Connection, historie: sqlite3.Connection
+) -> list[tuple[int, int, int, int]]:
+    """Vergleicht den fortgeschriebenen Boxinhalt von Snapshot ``a`` mit Snapshot ``b``.
+
+    Liefert die abweichenden Plätze als ``(BoxId, BoxPos, PNo erwartet, PNo in b)``. Eine leere
+    Liste heißt: Jede Inhaltsänderung zwischen den beiden Snapshots ist durch einen Pick oder
+    eine Montage der Historie erklärt.
+    """
+    erwartet = fortschreiben(boxinhalt(a), historie, exportzeit(a), exportzeit(b))
+    tatsaechlich = boxinhalt(b)
+    return sorted(
+        (box, platz, erwartet.get((box, platz), 0), pno)
+        for (box, platz), pno in tatsaechlich.items()
+        if erwartet.get((box, platz), 0) != pno
+    )

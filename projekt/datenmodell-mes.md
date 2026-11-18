@@ -50,8 +50,10 @@ erDiagram
 2. **Boxbestand nur aus `tblbufferpos`:** eine Zeile mit `BoxID > 0` ist eine verortete Box. Die Box selbst (PNo 29) ist kein Teilebestand.
 3. **Reservierung ist kein Bestand:** `ONo <> 0` auf einem Boxplatz bindet ihn. Ist zugleich `PNo = 0`, ist es ein reservierter leerer Zielplatz.
 4. **Frei** ist ein Teil nur mit `ONo = 0` und in einer verorteten Box (Befund B-10).
+5. **Ein Ort je Box:** Steht eine Box auf mehreren Pufferplätzen, gilt der Platz mit dem jüngsten `TimeStamp` (Befund B-11). Die Rohdaten bleiben unverändert.
+6. **Kreislauf:** Eine Box an einem Handarbeitsplatz (AASS1/AASS2, Ressourcen 26 und 27) zählt nicht als Transportbox, ihr Inhalt nicht als Startbestand.
 
-Umgesetzt in `src/matsim/daten/bestand.py`, geprüft in `tests/test_dump_import.py`.
+Umgesetzt in `src/matsim/daten/bestand.py` (`teilebestand`, `boxstandort_aufgeloest`, `startbestand`), geprüft in `tests/test_dump_import.py` und `tests/test_bestand.py`. Mit `python -m matsim.daten bestand <Snapshot>` werden alle Zählungen ausgegeben.
 
 ## 4. Befundregister
 
@@ -88,6 +90,7 @@ Die Zahlen unten stammen aus dem Snapshot 15:57 und sind in `tests/test_qualitae
 | B-18 | Planzeit gegen Istzeit | 4 Operationen | 3 | 75,0 % | neu |
 | B-19 | Montagepriorität im MES | 1 Abfrage | 0 | 0,0 % | neu |
 | B-20 | Picks ohne Produktionsposition | 749 Picks | 176 | 23,5 % | neu |
+| B-21 | Nutzung der Boxen ohne Ort | 19 Boxen | 0 | 0,0 % | neu |
 
 ### 4.2 Befunde im Einzelnen
 
@@ -151,8 +154,8 @@ Die Zahlen unten stammen aus dem Snapshot 15:57 und sind in `tests/test_qualitae
 - Prüfung: Jede Box aus `tblbox` steht auf einem Pufferplatz (`tblbufferpos.BoxID`) (`b09_verortete_boxen`).
 - Ergebnis: 40 Boxen, 19 ohne Ort (47,5 %), in allen sechs Snapshots gleich.
 - Beispiel: Boxen 1, 6 bis 10, 14, 16, 19, 23 bis 25, 28, 29, 31, 33, 35 bis 37.
-- Umgang: wird in Issue #2 nach Herkunft aufgeschlüsselt.
-- Modellfolge: Boxbestand der Simulation ist eine begründete Annahme (A-03).
+- Umgang: Die Zahl ist in allen sechs Snapshots gleich, ein Effekt des Exportzeitpunkts scheidet damit aus. Keine der 19 Boxen war seit dem 30.10.2026 Quell- oder Zielbox eines Picks, fünf nie (B-21). Sie stehen auch an keinem Handarbeitsplatz und an keiner mobilen Workstation. Wahrscheinlich sind sie außerhalb der Anlage; belegen lässt sich das nur durch eine Zählung im Labor (L-08).
+- Modellfolge: In die Simulation gehen nur die 21 verorteten Boxen (A-03): 7 leere Transportboxen, 13 Quellboxen mit Teilen, Box 38 am Handarbeitsplatz bleibt außen vor.
 
 **B-10 Teile in Boxen ohne Ort**
 - Prüfung: Teile in `tblboxpos`, deren Box auf keinem Pufferplatz steht (`b10_teile_ohne_ort`).
@@ -165,14 +168,14 @@ Die Zahlen unten stammen aus dem Snapshot 15:57 und sind in `tests/test_qualitae
 - Prüfung: Eine verortete Box steht auf genau einem Pufferplatz (`b11_doppelt_verortet`).
 - Ergebnis: 21 Boxen, 1 auffällig (4,8 %), nur im Snapshot 15:57; in den anderen fünf 0.
 - Beispiel: Box 11 auf Robotino 24 (24/1/1, Zeitstempel 15:50:55) und im Lager (17/1/14, Zeitstempel 15:57:09).
-- Umgang: Rohdaten bleiben unverändert; Auflösung über den jüngeren Zeitstempel (Issue #2, L-07).
-- Modellfolge: keine, solange nur Boxanzahlen gezählt werden.
+- Umgang: Robotino 24 hat Box 11 um 15:50:55 an RASS3 aufgenommen (RASS3-Platz 6/1/1 wird zur selben Sekunde frei), sein letzter Fahrauftrag endet um 15:55:27 (`tblmachinereport`), um 15:57:09 bucht das Boxlager die Box ein. Der Robotino-Platz wurde nicht zurückgesetzt. In den anderen Snapshots werden Robotino-Plätze nach der Übergabe geleert (z. B. Robotino 25: 15:22 Box 3, 15:25 leer). Rohdaten bleiben unverändert; es gilt der jüngste Zeitstempel (Zählregel 5), Box 11 steht also im Lager.
+- Modellfolge: keine; jede Box wird genau einmal gezählt.
 
 **B-12 Bindungen ohne laufenden Auftrag**
 - Prüfung: Jede Reservierung (`ONo <> 0` in `tblboxpos`, `tblbufferpos`, `tblcarrier`), jede Zeile in `tblstepparameter` und jede Buchung (`Booked = 1`) gehört zu einem Auftrag in `tblorder` (`b12_bindungen_ohne_auftrag`).
 - Ergebnis: Im Snapshot 15:57 ist `tblorder` leer, deshalb sind alle 31 Bindungen auffällig (100 %): 26 Zeilen `tblstepparameter` (ONo 1 und 7963) und 5 gebuchte Plätze an Ressource 19. Im Snapshot 15:16: 309 Bindungen, 30 auffällig (9,7 %).
 - Beispiel: 19/6/1 ist seit 21.10.2025 gebucht; Band 6 hat laut `tblbuffer` 0 Reihen und 0 Spalten und ist damit abgeschaltet.
-- Umgang: Gebuchte Plätze an Ressource 19 gelten nicht als frei (L-05).
+- Umgang: Gebucht ist immer Platz 1 eines Bandes; die Kennzeichen an Band 2 und 4 stehen seit 15:02:18 (Produktionsstart), an Band 6 seit 21.10.2025, und keines wird nach Produktionsende zurückgesetzt. Das Kennzeichen beschreibt die Belegung damit nicht verlässlich. Gleichzeitig standen an der Kommissionierstation bis zu drei Boxen (15:25: Zielbox 18 und Quellboxen 3 und 4). Gebuchte Plätze werden nicht ausgewertet (L-05).
 - Modellfolge: Kapazität des Kommissionierplatzes kommt aus der Historie (eine Charge zur Zeit, A-04), nicht aus den Buchungskennzeichen.
 
 **B-13 Filter der Zeitansätze**
@@ -231,6 +234,13 @@ Die Zahlen unten stammen aus dem Snapshot 15:57 und sind in `tests/test_qualitae
 - Umgang: Diese Picks zählen für die Kommissionierzeit. Für Aussagen über Satzvollständigkeit je Produkt werden sie nicht verwendet.
 - Modellfolge: Die Historie der Produktionsaufträge ist unvollständig, vermutlich gelöschte oder abgebrochene Aufträge. Bedarfsmuster lassen sich daraus nicht ableiten (L-09).
 
+**B-21 Nutzung der Boxen ohne Ort**
+- Prüfung: Eine Box ohne Ort (B-09) war am Tag des Snapshots Quell- oder Zielbox eines Picks (Parameter 3 bzw. 6 von OpNo 220) (`b21_boxen_ohne_ort_genutzt`).
+- Ergebnis: 19 Boxen, 0 auffällig (0,0 %).
+- Beispiel: Jüngste Nutzung 30.10.2026 (Boxen 14 und 19), nie genutzt: Boxen 1, 28, 31, 35, 37.
+- Umgang: stützt die Annahme, dass diese Boxen außerhalb der Anlage sind (L-08).
+- Modellfolge: Boxen ohne Ort und ihre 15 Teile gehen nicht in den Basisfall (A-02, A-03).
+
 ### 4.3 Stichprobe und Live-Zugriff
 
 - Stichprobe von Hand: Auftrag 9178 vom Auslagern bis zum Einlagern, mit Abgleich gegen alle sechs Snapshots, in [stichprobe-auftrag-9178.md](stichprobe-auftrag-9178.md). Wiederholbar mit `python -m matsim.daten stichprobe 9178`.
@@ -276,4 +286,40 @@ Teile in Boxen laut `tblboxpos`, frei / reserviert:
 
 Der Verbrauch von je 3 Stück der Teile 800, 814, 811, 813 und 831 passt zu 3 gefertigten Produkten. Die Summe aus frei und reserviert sinkt nur durch Montage. Reservierte leere Zielplätze: 15:22 sechs Plätze in Box 18 für ONo 9179, 15:25 vier, 15:36 drei Plätze in Box 11 für ONo 9180, 15:41 einer.
 
-Sechs Momentaufnahmen sind keine Bestandshistorie. Zwischen zwei Snapshots sind Bewegungen nur über die Schritthistorie der Aufträge 9176 bis 9180 nachvollziehbar (L-04).
+Sechs Momentaufnahmen sind keine Bestandshistorie. Zwischen zwei Snapshots lassen sich die Bewegungen aber vollständig aus der Schritthistorie ablesen:
+
+### 7.1 Abgleich Schritthistorie gegen Snapshots
+
+Jeder Pick (OpNo 220) nennt in seinen Parametern Quellbox und -platz, Zielbox und -platz und das Teil (Abschnitt 5). Jede Montage leert den Platz, den der Pick für genau diesen Auftrag, diese Position und diesen Schritt belegt hat. `matsim.daten.materialpfad.abgleich` schreibt den Boxinhalt (`tblboxpos.PNo` je Platz) von Snapshot A mit allen Picks und Montagen bis zum Export von Snapshot B fort und vergleicht ihn mit B. Exportzeitpunkt = jüngster Zeitstempel im Snapshot.
+
+```text
+.venv\Scripts\python -m matsim.daten abgleich 2026-11-09_1516 2026-11-09_1522
+```
+
+| A → B | Export A | Export B | Picks | Montagen | abweichende Boxplätze von 320 |
+|---|---|---|---:|---:|---:|
+| 15:16 → 15:22 | 15:16:35 | 15:22:21 | 0 | 4 | 0 |
+| 15:22 → 15:25 | 15:22:21 | 15:25:11 | 2 | 2 | 0 |
+| 15:25 → 15:36 | 15:25:11 | 15:36:43 | 4 | 1 | 0 |
+| 15:36 → 15:41 | 15:36:43 | 15:41:01 | 2 | 4 | 0 |
+| 15:41 → 15:57 | 15:41:01 | 15:57:39 | 1 | 4 | 0 |
+
+Ergebnis: Jede Inhaltsänderung zwischen zwei Snapshots ist durch einen Pick oder eine Montage erklärt (zusammen 9 Picks und 15 Montagen, also 3 Produkte mit je 5 Teilen; die übrigen 6 Picks lagen vor 15:16); es verschwindet kein Teil und es taucht keines auf. Die Abweichungen beim Boxbestand sind damit keine verlorenen Bewegungen: B-09 und B-10 bestehen schon vor dem Ablauf, B-11 betrifft nur die Pufferbelegung, nicht den Boxinhalt. Geprüft in `tests/test_bestand.py`.
+
+### 7.2 Startbestand für die Simulation
+
+Quelle: Snapshot 15:57 (Ruhezustand nach Produktionsende, keine Reservierungen, keine Box unterwegs), Zählregeln aus Abschnitt 3, Funktion `matsim.daten.bestand.startbestand`.
+
+| Größe | Wert | Begründung |
+|---|---:|---|
+| Boxen laut Stammdaten | 40 | `tblboxdef.Count` |
+| Boxen ohne Ort | 19 | nicht in der Simulation (B-09, B-21) |
+| verortete Boxen | 21 | jede genau einmal (Zählregel 5) |
+| davon leere Transportboxen | 7 | Boxen 2, 4, 11, 15, 18, 34, 39 |
+| davon Quellboxen mit Teilen | 13 | Inhalt = Anfangsbestand |
+| davon am Handarbeitsplatz | 1 | Box 38 an AASS1, leer, seit 12.03.2026 nicht kommissioniert |
+| freie Teile | 800: 4, 811: 5, 812: 9, 813: 5, 814: 4, 831: 5, 832: 8, 833: 7, 834: 9 | `ONo = 0`, verortete Box im Kreislauf |
+| Teile in Boxen ohne Ort | 800: 5, 814: 9, 832: 1 | nur Sensitivität (A-02) |
+| vollständige Produkte WPNo 1000 aus dem Bestand | 4 | begrenzt durch 800 und 814 (L-11) |
+
+Die Werte stehen mit Herkunft in `config/anlage.yaml` (`box`, `materiallager`) und werden in `tests/test_bestand.py` gegen den Snapshot geprüft.

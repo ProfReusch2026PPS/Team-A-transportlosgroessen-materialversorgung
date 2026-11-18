@@ -423,6 +423,24 @@ def b20_pick_ohne_produktionsposition(v: sqlite3.Connection) -> Pruefergebnis:
     )
 
 
+@_pruefung("B-21")
+def b21_boxen_ohne_ort_genutzt(v: sqlite3.Connection) -> Pruefergebnis:
+    ohne_ort = bestand.startbestand(v).boxen_ohne_ort
+    letzte = bestand.letzte_kommissionierung_je_box(v)
+    tag = materialpfad.exportzeit(v).strftime("%Y-%m-%d")
+    am_tag = [b for b in ohne_ort if (letzte[b] or "") >= tag]
+    nie = [b for b in ohne_ort if letzte[b] is None]
+    juengste = max((letzte[b] for b in ohne_ort if letzte[b]), default=None)
+    return Pruefergebnis(
+        "B-21",
+        "Nutzung der Boxen ohne Ort",
+        "Box ohne Ort war am Tag des Snapshots Quell- oder Zielbox eines Picks",
+        len(ohne_ort),
+        len(am_tag),
+        f"nie kommissioniert: {nie}; jüngste Nutzung: {juengste}",
+    )
+
+
 def pruefe_alle(verbindung: sqlite3.Connection) -> list[Pruefergebnis]:
     """Führt alle registrierten Prüfungen in der Reihenfolge der Befundnummern aus."""
     return [PRUEFUNGEN[nr](verbindung) for nr in sorted(PRUEFUNGEN)]
