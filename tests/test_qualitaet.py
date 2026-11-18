@@ -22,7 +22,7 @@ def test_live_vergleich_fragt_nur_lesend():
 @pytest.mark.dumps
 def test_alle_pruefungen_laufen_und_sind_vollstaendig(snapshots):
     ergebnisse = qualitaet.pruefe_alle(snapshots["1557"])
-    assert [e.nr for e in ergebnisse] == [f"B-{i:02d}" for i in range(1, 23)]
+    assert [e.nr for e in ergebnisse] == [f"B-{i:02d}" for i in range(1, 25)]
     for e in ergebnisse:
         assert 0 <= e.auffaellig <= e.geprueft, e.nr
         assert e.pruefung and e.beispiel, e.nr

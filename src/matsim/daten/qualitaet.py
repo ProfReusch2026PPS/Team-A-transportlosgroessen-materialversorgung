@@ -453,6 +453,36 @@ def b22_fahrzeugzuordnung(v: sqlite3.Connection) -> Pruefergebnis:
     )
 
 
+@_pruefung("B-23")
+def b23_gemischte_zielboxen(v: sqlite3.Connection) -> Pruefergebnis:
+    nutzungen, paare = materialpfad.gemischte_zielboxen(v)
+    stationen = [(a, b) for a, b in paare if a.wpno != b.wpno]
+    return Pruefergebnis(
+        "B-23",
+        "Gemischte Zielboxen",
+        "Zielbox trägt zur selben Zeit Teile zweier Kommissionieraufträge",
+        nutzungen,
+        len(paare),
+        f"davon für verschiedene Stationen: {len(stationen)}; "
+        f"Zielboxen je Kommissionierauftrag: genau 1",
+    )
+
+
+@_pruefung("B-24")
+def b24_satzvollstaendigkeit(v: sqlite3.Connection) -> Pruefergebnis:
+    klassen = materialpfad.satzpruefung(v)
+    geprueft = sum(len(liste) for liste in klassen.values())
+    return Pruefergebnis(
+        "B-24",
+        "Vollständige Sätze in einer Box (WPNo 1000)",
+        "Satz geteilt auf mehrere Boxen, unvollständig kommissioniert oder ohne Pick",
+        geprueft,
+        geprueft - len(klassen["vollstaendig"]),
+        ", ".join(f"{k}: {len(liste)}" for k, liste in klassen.items())
+        + f"; ohne Pick: {klassen['ohne_pick']}",
+    )
+
+
 def pruefe_alle(verbindung: sqlite3.Connection) -> list[Pruefergebnis]:
     """Führt alle registrierten Prüfungen in der Reihenfolge der Befundnummern aus."""
     return [PRUEFUNGEN[nr](verbindung) for nr in sorted(PRUEFUNGEN)]

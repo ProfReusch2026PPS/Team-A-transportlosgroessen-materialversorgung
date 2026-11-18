@@ -50,6 +50,43 @@ box:
     herkunft: abgeleitet
     beleg: "verortete Boxen mit freien Teilen im Lager 17, Snapshot 15:57; ihr Inhalt ist materiallager.anfangsbestand"
 
+# Beladungsregeln (Issue #4). Belege: docs/projekt/datenmodell-mes.md, Abschnitt 5. "mes" heißt:
+# im hinterlegten SQL oder Arbeitsplan festgelegt; "abgeleitet": aus der Historie belegt, aber
+# vom MES nicht erzwungen.
+beladung:
+  stationen_je_box:
+    wert: 1
+    herkunft: abgeleitet
+    beleg: "Kommissionierplan WPNo 1/2/3 liefert per OpNo 215 an genau eine Ressource 2/4/6 (tblstepdef Schritt 20); Montage findet Teile nur in einer Box an der eigenen Ressource (tblstepparameterdef 1000/30 Parameter 2); Historie: nie gemischt, 229 Zielbox-Nutzungen (B-23). Keine Sperre im MES (A-06)"
+  zielboxen_je_kommissionierauftrag:
+    wert: 1
+    herkunft: abgeleitet
+    beleg: "229 von 229 Kommissionieraufträgen setzen alle Teile in dieselbe Zielbox (tblfinstepparameter Parameter 6)"
+  satz_vollstaendig_in_einer_box:
+    wert: true
+    herkunft: abgeleitet
+    beleg: "Aufgabenstellung; Historie WPNo 1000: 262 Sätze vollständig in einer Box, 0 geteilt, 0 unvollständig, 2 ohne Pick (B-24)"
+  max_saetze_je_box:
+    RASS1: {wert: 4, herkunft: abgeleitet, beleg: "box.positionen 8 / Satzgröße 2; 15 Kommissionieraufträge mit 8 Teilen für RASS1 (B-15)"}
+    RASS2: {wert: 4, herkunft: abgeleitet, beleg: "box.positionen 8 / Satzgröße 2; 10 Kommissionieraufträge mit 8 Teilen für RASS2 (B-15)"}
+    RASS3: {wert: 8, herkunft: abgeleitet, beleg: "box.positionen 8 / Satzgröße 1; 3 Kommissionieraufträge mit 8 Teilen für RASS3 (B-15)"}
+  saetze_verschiedener_auftraege_in_einer_box:
+    wert: true
+    herkunft: mes
+    beleg: "Jede Position eines Kommissionierauftrags nennt ihren Produktionsauftrag (Parameter 8/9); 28 von 229 Aufträgen bündeln Sätze mehrerer Produktionsaufträge, z. B. 9177: 9176/1, 9178/1, 9178/2"
+  wiederverwendung_erst_nach_leerung:
+    wert: true
+    herkunft: abgeleitet
+    beleg: "Keine Zielbox trug je Teile zweier Kommissionieraufträge gleichzeitig (B-23); Box 11 erst für 9177 (RASS1), nach Leerung für 9180 (RASS3)"
+  reservierung_ab_freigabe:
+    wert: true
+    herkunft: mes
+    beleg: "Quellteile und Zielplätze sind ab Freigabe des Kommissionierauftrags mit dessen ONo/OPos gebunden (Snapshot 15:22: Box 4 Platz 7 für 9179/3); bei Ablieferung bucht das SQL von OpNo 215 auf den Produktionsauftrag um (tblstepdef WPNo 1 Schritt 20 SqlWrite)"
+  montage_nur_aus_box_an_eigener_station:
+    wert: true
+    herkunft: mes
+    beleg: "tblstepparameterdef 1000/30, 60, 100, 110, 160 Parameter 2: Boxplatz mit ONo, OPos und PNo des Werkstücks an tblbufferpos.ResourceId der Station"
+
 materiallager:
   resource_id: {wert: 17, herkunft: mes, beleg: "tblresource: CP-F-ASRS20-B, tblbuffer 17/1 Storage 4x5"}
   lagerplaetze: {wert: 20, herkunft: mes, beleg: "tblbufferpos ResourceId 17, BufNo 1: 20 Zeilen"}

@@ -1,6 +1,6 @@
 # MES-Datenmodell und Befunde
 
-Verantwortlich: AP1. Stand: Befundregister mit wiederholbaren Prüfungen (Issue #1), geprüft gegen alle sechs Snapshots vom 09.11.2026.
+Verantwortlich: AP1. Stand: Befundregister mit wiederholbaren Prüfungen, Startbestand, Zeitansätze und Beladungsregeln (Issues #1 bis #4), geprüft gegen alle sechs Snapshots vom 09.11.2026.
 
 Quelle ist die Datenbank `MES4` (Festo MES4, MariaDB 10.4.32, 64 Tabellen). Der Import (`python -m matsim.daten importiere`) überführt jeden Dump in eine SQLite-Datei mit 62 Tabellen; `tblcustomer` und `tblusercontrol` werden wegen personenbezogener Daten ausgeschlossen. Die Rohdateien bleiben unverändert.
 
@@ -92,6 +92,8 @@ Die Zahlen unten stammen aus dem Snapshot 15:57 und sind in `tests/test_qualitae
 | B-20 | Picks ohne Produktionsposition | 749 Picks | 176 | 23,5 % | neu |
 | B-21 | Nutzung der Boxen ohne Ort | 19 Boxen | 0 | 0,0 % | neu |
 | B-22 | Zuordnung der Ablieferungen zu Robotino-Fahraufträgen | 229 Ablieferungen | 40 | 17,5 % | neu |
+| B-23 | Gemischte Zielboxen | 229 Zielbox-Nutzungen | 0 | 0,0 % | neu |
+| B-24 | Vollständige Sätze in einer Box | 264 Sätze | 2 | 0,8 % | neu |
 
 ### 4.2 Befunde im Einzelnen
 
@@ -249,20 +251,94 @@ Die Zahlen unten stammen aus dem Snapshot 15:57 und sind in `tests/test_qualitae
 - Umgang: Fahrzeiten nur aus den zuordenbaren und vollständig verketteten Fahraufträgen (170).
 - Modellfolge: `fahrzeuge.fahrauftrag_s` = 96 s mit Verteilung; Fahrzeuganzahl 2 (A-05).
 
+**B-23 Gemischte Zielboxen**
+- Prüfung: Eine Zielbox trägt zur selben Zeit Teile zweier Kommissionieraufträge. Nutzungszeitraum = erster Pick in die Box bis letzter Verbrauch dieser Teile (`b23_gemischte_zielboxen`).
+- Ergebnis: 229 Zielbox-Nutzungen, 0 auffällig (0,0 %).
+- Beispiel: Box 11 trug am 09.11.2026 die Teile von 9174 (RASS2) von 13:38:14 bis 13:44:54, von 9177 (RASS1) von 15:09:15 bis 15:24:19 und von 9180 (RASS3) von 15:39:34 bis 15:49:01.
+- Umgang: keiner nötig.
+- Modellfolge: Regel „eine Box nur für eine Station“ aus der Historie belegt (Abschnitt 5.4).
+
+**B-24 Vollständige Sätze in einer Box**
+- Prüfung: Für jedes Werkstück WPNo 1000 und jede Station liegen alle Teile des Satzes im selben Kommissionierauftrag und damit in derselben Box (`b24_satzvollstaendigkeit`).
+- Ergebnis: 264 Sätze, 2 auffällig (0,8 %), beide ohne Pick; geteilt oder unvollständig: 0.
+- Beispiel: 8926/1 an RASS1 und 9093/1 an RASS3 ohne Pick.
+- Umgang: keiner.
+- Modellfolge: Satz wird nur vollständig in einer Box geliefert (Abschnitt 5.4).
+
 ### 4.3 Stichprobe und Live-Zugriff
 
 - Stichprobe von Hand: Auftrag 9178 vom Auslagern bis zum Einlagern, mit Abgleich gegen alle sechs Snapshots, in [stichprobe-auftrag-9178.md](stichprobe-auftrag-9178.md). Wiederholbar mit `python -m matsim.daten stichprobe 9178`.
 - Live-Zugriff: Der Befehl `python -m matsim.daten live-vergleich` vergleicht die Zeilenzahlen von 17 Tabellen der Live-Datenbank mit einem Snapshot. Er führt nur `SELECT COUNT(*)` aus und ist im Labornetz noch nicht gelaufen (L-10).
 
-## 5. Materialpfad und zulässige Kombinationen
+## 5. Materialpfad und Beladungsregeln
 
-Aus B-05 bis B-07 folgt:
+### 5.1 Weg eines Teils
 
-1. Ein Kommissionierauftrag hat genau einen Arbeitsplan (WPNo 1, 2 oder 3) und damit genau eine Zielstation. Seine Teileauswahl ist auf die Gruppe der Station begrenzt (Parameter 11: Gruppe 5, 6 bzw. 12).
-2. Alle Positionen eines Kommissionierauftrags werden in dieselbe Zielbox umgesetzt und mit OpNo 215 gemeinsam an der Station abgeliefert (beobachtet: Box 11 für 9177, Box 18 für 9179, Box 11 für 9180).
-3. Die Montage findet ein Teil nur in einer Box am Puffer der eigenen Station.
+Der Weg ist für jedes Teil der Historie lückenlos über die Parameter des Kommissionierschritts nachvollziehbar (`src/matsim/daten/materialpfad.py`). An Auftrag 9178 von Hand nachverfolgt: [stichprobe-auftrag-9178.md](stichprobe-auftrag-9178.md).
 
-Eine Box mit Sätzen verschiedener Stationen wäre technisch befüllbar (alle Boxplätze haben Gruppe 9), aber die Sätze der fremden Station könnten dort nicht verbaut werden. **Abgeleitete Regel:** Eine Charge enthält nur Sätze einer Station. Rechnerische Obergrenzen je Box: 4 RASS1-Sätze, 4 RASS2-Sätze, 8 RASS3-Sätze. Die Regel ist abgeleitet, nicht als MES-Sperre hinterlegt (A-06).
+| Schritt | Was passiert | Fundstelle im MES | Wirkung auf die Daten |
+|---|---|---|---|
+| 1. Kommissionierauftrag freigeben | Auftrag mit WPNo 1, 2 oder 3 (= Zielstation RASS1, 2, 3); eine Position je Teil | `tblstepdef` WPNo 1/2/3, Schritt 10 OpNo 220 an Ressource 19, Schritt 20 OpNo 215 an Ressource 2/4/6 | Quellteil und leerer Zielplatz tragen ab jetzt `ONo/OPos` des Kommissionierauftrags (Reservierung, kein neuer Bestand) |
+| 2. Quell- und Zielbox an die Kommissionierung | Robotinos holen die Boxen aus dem Boxlager (Ressource 17) | nicht in der Schritthistorie; nur in `tblbufferpos` (Momentaufnahme) und `tblmachinereport` | 1 bis 5 Quellboxen je Auftrag (Abschnitt 6.4) |
+| 3. Umsetzen (Pick) | Teil aus Quellbox/-platz in Zielbox/-platz | Parameter 2 bis 11 von OpNo 220; `tbloperation.SqlWrite` 220 | Zielplatz `PNo` = Teil; Quellplatz `ONo = OPos = PNo = 0` |
+| 4. Ablieferung | Robotino fährt die Zielbox zur Station und übergibt sie auf einen freien Box-Pufferplatz | `tblstepdef` WPNo 1, Schritt 20, OpNo 215; Parameter 2 sucht einen freien Platz (`PNo = 0`) in `BufNo 1` der Station | `ONo/OPos` der Boxplätze werden vom Kommissionierauftrag auf den Produktionsauftrag umgebucht (Parameter 8/9) |
+| 5. Montage | Werkstück an der Station, Roboter entnimmt das Teil | `tblstepparameterdef` 1000/30, 60, 100, 110, 160, Parameter 2; `tbloperation.SqlWrite` 323 bis 325 | Boxplatz `ONo = OPos = PNo = 0` |
+| 6. Leerbox zurück | Robotino bringt die leere Box ins Boxlager | nicht in der Schritthistorie | Box wieder als Ziel- oder Quellbox verfügbar |
+
+### 5.2 Was das hinterlegte SQL prüft und was nicht
+
+| Abfrage | prüft | prüft nicht |
+|---|---|---|
+| Teileauswahl beim Anlegen (WPNo 1/2/3, Schritt 10, Parameter 11, `QueryChooseParameter`) | Auswahlliste nur aus der Materialgruppe der Station: `tblPNoGroup.Id` = 5 (RASS1), 6 (RASS2), 12 (RASS3) | Es ist eine Auswahlliste der Oberfläche, keine Sperre in der Datenbank |
+| Quell- und Zielpuffer (Schritt 10, Parameter 2 und 5) | `BufNo` an Ressource 19, auf dem die genannte Box (Parameter 3 bzw. 6) steht | ob die Zielbox leer ist oder schon Teile eines anderen Auftrags trägt |
+| Umsetzen (`tbloperation.SqlWrite` OpNo 220) | schreibt Teil auf Zielplatz, leert Quellplatz | Kapazität oder Inhalt der Zielbox |
+| Ablieferplatz (WPNo 1, Schritt 20, Parameter 2) | freier Platz (`PNo = 0`) im Box-Puffer `BufNo 1` der Station mit passender Zone (alle Zone 7 = Box, B-05) | Inhalt der Box |
+| Umbuchung bei Ablieferung (`SqlWrite` WPNo 1, Schritt 20) | bucht alle Plätze mit `ONo/OPos` des Kommissionierauftrags an dieser Ressource auf Produktionsauftrag und -position um | |
+| Teil finden bei der Montage (1000/30 usw., Parameter 2) | Boxplatz mit `ONo`, `OPos` und `PNo` des Werkstücks in einer Box, die an `ResourceId` der Station steht | auf welchem der zwei Box-Pufferplätze die Box steht |
+| Verbrauch (`SqlWrite` 323 bis 325) | leert den gefundenen Platz im Box-Puffer `BufNo 1` der Station | |
+| Montagepriorität (`tblsqlquery` 100/1 und 100/16) | nächste Operation nach `PlannedStart, ONo, OPos`, nur `State < 10` | Materialverfügbarkeit |
+
+Folgerung: Das MES verhindert gemischte Boxen nicht. Eine Box fährt aber je Kommissionierauftrag nur eine Station an (Schritt 20 hat eine feste Ressource), und dort findet die Montage nur Teile, die auf ein Werkstück dieser Station gebucht sind. Teile einer anderen Station in derselben Box blieben ungenutzt, bis die Box zurück ist und neu kommissioniert wird.
+
+### 5.3 Historie: gemischte Boxen und unvollständige Sätze
+
+Ausgewertet über alle 229 Kommissionieraufträge vom 11.06.2025 bis 09.11.2026 (`gemischte_zielboxen`, `satzpruefung`, Prüfungen B-15, B-23, B-24):
+
+- Jeder Kommissionierauftrag füllt genau **eine Zielbox** (229 von 229).
+- Kein Teil liegt außerhalb der Materialgruppe der Zielstation (0 von 749 Picks).
+- **Keine gemischte Box:** Zielbox-Nutzung = erster Pick bis letzter Verbrauch der Teile. In keinem der 229 Fälle trug eine Box zur selben Zeit Teile eines zweiten Kommissionierauftrags, weder für dieselbe noch für eine andere Station. Boxen werden erst nach der Leerung wiederverwendet (Box 11: 9177 für RASS1, dann 9180 für RASS3).
+- **Keine unvollständigen Sätze:** Von 264 Sätzen der WPNo 1000 (88 Werkstücke × 3 Stationen) liegen 262 vollständig in einer Box, 0 sind auf zwei Boxen geteilt, 0 unvollständig, 2 ohne Pick (8926/1 an RASS1, 9093/1 an RASS3; vgl. B-07).
+- Sätze verschiedener Produktionsaufträge in einer Box sind üblich: 28 von 229 Aufträgen bündeln Sätze aus 2 bis 5 Produktionsaufträgen.
+- Bündelungsgrößen: 1 bis 8 Sätze je Box; mit 8 Teilen voll waren 15 Boxen für RASS1, 10 für RASS2 und 3 für RASS3 (B-15).
+
+### 5.4 Beladungsregeln
+
+| Regel | Wert | Herkunft | Beleg |
+|---|---|---|---|
+| Satzinhalt WPNo 1000 | RASS1: 800 + 814; RASS2: 813 + 811; RASS3: 831 | MES | `tblstepdef`, `tblstepparameterdef` (B-04) |
+| Boxkapazität | 8 Teile | MES | `tblboxdef.PosCount` (B-03) |
+| Sätze je Box höchstens | RASS1 4, RASS2 4, RASS3 8 | abgeleitet | 8 / Satzgröße; volle Boxen in der Historie (B-15) |
+| Eine Box nur für eine Station | ja | abgeleitet | Plan mit fester Zielstation, Montage nur an eigener Station (5.2); Historie nie gemischt (B-23). Keine MES-Sperre, deshalb weiterhin als A-06 geführt |
+| Satz vollständig in einer Box | ja | abgeleitet | Aufgabenstellung; Historie 262 von 262 kommissionierten Sätzen (B-24) |
+| Eine Zielbox je Kommissionierauftrag | ja | abgeleitet | 229 von 229 (Parameter 6) |
+| Sätze verschiedener Produktionsaufträge in einer Box | erlaubt | MES | Parameter 8/9 je Position; 28 Aufträge bündeln so |
+| Box erst nach Leerung wiederverwenden | ja | abgeleitet | B-23 |
+| Reservierung ab Freigabe | ja | MES | Snapshots 15:22 und 15:36; Umbuchung durch OpNo 215 (5.2) |
+| Montage nur aus Box an eigener Station | ja | MES | Parameter 2 der Montageschritte (5.2) |
+| Kommissionierplatz: eine Charge zur Zeit | 1 | abgeleitet | Abschnitt 6.3 |
+
+Die Regeln stehen mit Herkunft im Abschnitt `beladung` von `config/anlage.yaml` und werden in `tests/test_materialpfad.py` gegen die Historie geprüft.
+
+### 5.5 Übergabe an die Simulation (AP3)
+
+`config/anlage.yaml` enthält alles, was die Simulation über die Anlage braucht; jeder Wert hat `herkunft` und `beleg`. Für die Abstimmung mit AP3 (Mehmet) sind diese Punkte zu klären:
+
+1. **Startbestand reicht für 4 Produkte** (L-11). Die Szenarien sehen 12 vor. Entweder Anfangsbestand als Szenarioannahme erhöhen oder Nachschub modellieren (Entscheidung AP5 mit AP3).
+2. **Hintransport:** Werden Fahrzeuge als Ressource modelliert, gilt `fahrzeuge.fahrauftrag_s` (96 s), sonst `fahrzeuge.hintransport_s` (130 s), nie beides (A-07).
+3. **Quellboxfahrten:** Dieselben Robotinos fahren 1 bis 5 Quellboxen je Kommissionierauftrag (Abschnitt 6.4). Ob die Simulation das abbildet oder vernachlässigt, entscheidet AP3; ohne sie sind die Fahrzeuge weniger ausgelastet als in der Anlage.
+4. **Stationsbelegung:** Eine Station ist je Werkstück `belegung_je_werkstueck_s` belegt (RASS1 136 s), nicht nur die Montagezeit.
+5. **Wiederkehrregel** bleibt offen, bis das Referenzpaket da ist (L-01). Für die Umlaufzeit gibt es eine Annahme (140 s, A-10).
+6. **Verteilungen** für das Szenario `unsicherheit`: `matsim.daten.zeiten.verteilung(<Parameterpfad>)`; die Szenariodatei nennt bisher nur Pickzeit und Hintransport.
 
 ## 6. Zeitansätze aus der Historie
 

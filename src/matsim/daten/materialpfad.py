@@ -284,3 +284,98 @@ def quellboxen_je_auftrag(verbindung: sqlite3.Connection) -> dict[int, int]:
     for u in umsetzungen(verbindung):
         quellen[u.ono].add(u.quellbox)
     return {ono: len(boxen) for ono, boxen in sorted(quellen.items())}
+
+
+@dataclass(frozen=True)
+class Zielboxnutzung:
+    """Zeitraum, in dem eine Zielbox Teile eines Kommissionierauftrags trägt."""
+
+    zielbox: int
+    ono: int
+    wpno: int
+    beginn: datetime  # erster Pick in die Box
+    ende: datetime  # letzte Montage eines dieser Teile, ersatzweise Ende der Ablieferung
+
+
+def zielboxnutzungen(verbindung: sqlite3.Connection) -> list[Zielboxnutzung]:
+    """Je Kommissionierauftrag und Zielbox der Zeitraum vom ersten Pick bis zum letzten Verbrauch."""
+    montageende = {
+        (ono, opos, stepno): _zeit(ende)
+        for ono, opos, stepno, ende in verbindung.execute(
+            "SELECT ONo, OPos, StepNo, End FROM tblfinstep WHERE OpNo IN (323, 324, 325) "
+            "AND End IS NOT NULL AND End <> ''"
+        )
+    }
+    lieferende = {a.ono: a.ende for a in ablieferungen(verbindung)}
+    gruppen: dict[tuple[int, int], list[Umsetzung]] = defaultdict(list)
+    for u in umsetzungen(verbindung):
+        if u.start is not None:
+            gruppen[(u.zielbox, u.ono)].append(u)
+    nutzungen = []
+    for (box, ono), teile in gruppen.items():
+        enden = [
+            montageende.get((u.prod_ono, u.prod_opos, u.prod_stepno)) or lieferende.get(ono)
+            for u in teile
+        ]
+        enden = [e for e in enden if e is not None] or [max(u.ende or u.start for u in teile)]
+        nutzungen.append(
+            Zielboxnutzung(box, ono, teile[0].wpno, min(u.start for u in teile), max(enden))
+        )
+    return sorted(nutzungen, key=lambda n: (n.zielbox, n.beginn))
+
+
+def gemischte_zielboxen(
+    verbindung: sqlite3.Connection,
+) -> tuple[int, list[tuple[Zielboxnutzung, Zielboxnutzung]]]:
+    """Paare von Kommissionieraufträgen, deren Teile zur selben Zeit in derselben Zielbox lagen.
+
+    Liefert ``(Anzahl Nutzungen, überlappende Paare)``. Ein Paar mit verschiedenem ``wpno`` wäre
+    eine nach Station gemischte Box.
+    """
+    nutzungen = zielboxnutzungen(verbindung)
+    paare = []
+    for i, a in enumerate(nutzungen):
+        for b in nutzungen[i + 1 :]:
+            if b.zielbox != a.zielbox:
+                break
+            if b.beginn < a.ende:
+                paare.append((a, b))
+    return len(nutzungen), paare
+
+
+def satzpruefung(verbindung: sqlite3.Connection) -> dict[str, list[tuple[int, int, int]]]:
+    """Ordnet jeden Satz (Produktionsposition WPNo 1000 x Station) einer von vier Klassen zu.
+
+    * ``vollstaendig``: alle Teile des Satzes im selben Kommissionierauftrag, also derselben Box
+    * ``geteilt``: alle Teile kommissioniert, aber über mehrere Aufträge bzw. Boxen verteilt
+    * ``unvollstaendig``: nur ein Teil des Satzes kommissioniert
+    * ``ohne_pick``: kein Teil des Satzes kommissioniert
+
+    Liefert je Klasse ``(ONo, OPos, Zielstation-WPNo)``. Grundlage sind die Montageschritte von
+    WPNo 1000 (30/60 RASS1, 100/110 RASS2, 160 RASS3).
+    """
+    satzschritte = {1: (30, 60), 2: (100, 110), 3: (160,)}
+    positionen = verbindung.execute(
+        "SELECT ONo, OPos FROM tblfinorderpos WHERE WPNo = 1000 ORDER BY ONo, OPos"
+    ).fetchall()
+    pick = {(u.prod_ono, u.prod_opos, u.prod_stepno): u.ono for u in umsetzungen(verbindung)}
+    klassen: dict[str, list[tuple[int, int, int]]] = {
+        "vollstaendig": [],
+        "geteilt": [],
+        "unvollstaendig": [],
+        "ohne_pick": [],
+    }
+    for ono, opos in positionen:
+        for wpno, schritte in satzschritte.items():
+            auftraege = [pick.get((ono, opos, s)) for s in schritte]
+            gefunden = [a for a in auftraege if a is not None]
+            if not gefunden:
+                klasse = "ohne_pick"
+            elif len(gefunden) < len(schritte):
+                klasse = "unvollstaendig"
+            elif len(set(gefunden)) > 1:
+                klasse = "geteilt"
+            else:
+                klasse = "vollstaendig"
+            klassen[klasse].append((ono, opos, wpno))
+    return klassen
