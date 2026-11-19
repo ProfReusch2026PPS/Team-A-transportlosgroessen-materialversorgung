@@ -369,14 +369,23 @@ Die Regeln stehen mit Herkunft im Abschnitt `beladung` von `config/anlage.yaml` 
 
 ### 5.5 Übergabe an die Simulation (AP3)
 
-`config/anlage.yaml` enthält alles, was die Simulation über die Anlage braucht; jeder Wert hat `herkunft` und `beleg`. Für die Abstimmung mit AP3 (Mehmet) sind diese Punkte zu klären:
+`config/anlage.yaml` enthält alles, was die Simulation über die Anlage braucht; jeder Wert hat `herkunft` und `beleg`. AP3 (Mehmet Örücü) hat die Datei am 19.11.2026 freigegeben. Die Wünsche aus Issue #19 sind so umgesetzt:
 
-1. **Startbestand reicht für 4 Produkte** (L-11). Die Szenarien sehen 12 vor. Entweder Anfangsbestand als Szenarioannahme erhöhen oder Nachschub modellieren (Entscheidung AP5 mit AP3).
+| Wunsch aus #19 | Parameter in `config/anlage.yaml` | Wert |
+|---|---|---|
+| Belegung der Station je Werkstück | `stationen.RASSx.belegung_je_werkstueck_s` | 136 / 121 / 63 s |
+| Bandlaufzeit zwischen Nachbarstationen | `werkstueckumlauf.bandsegment_s`, `umlaufzeit_s` | 14 s, 140 s (A-10) |
+| Vorlauf bis zum ersten Pick | `kommissionierplatz.vorlauf_s` | 264 s (Abschnitt 6.3) |
+| Pausen beim Quellkistenwechsel | `kommissionierplatz.quellboxwechsel_s`, `quellboxen_je_auftrag` | 62 s, 2 Boxen |
+| Leerboxrückführung ins Kistenlager, Wiederverwendung | `fahrzeuge.leerbox_ziel_resource_id`, `leerboxruecktransport_s`, `beladung.wiederverwendung_erst_nach_leerung` | Ressource 17, 96 s (A-09), ja |
+| reine Fahrzeit Robotino | `fahrzeuge.fahrauftrag_s` | 96 s (Abschnitt 6.4) |
+
+Noch offen ist nur `werkstueckumlauf.wiederkehrregel` (Referenzpaket, L-01). Diese Punkte entscheiden andere Pakete, AP1 liefert dafür die Daten:
+
+1. **Startbestand reicht für 4 Produkte** (L-11). Die Szenarien sehen 12 vor. Entweder Anfangsbestand als Szenarioannahme erhöhen oder Nachschub modellieren (AP5 mit AP3).
 2. **Hintransport:** Werden Fahrzeuge als Ressource modelliert, gilt `fahrzeuge.fahrauftrag_s` (96 s), sonst `fahrzeuge.hintransport_s` (130 s), nie beides (A-07).
-3. **Quellboxfahrten:** Dieselben Robotinos fahren 1 bis 5 Quellboxen je Kommissionierauftrag (Abschnitt 6.4). Ob die Simulation das abbildet oder vernachlässigt, entscheidet AP3; ohne sie sind die Fahrzeuge weniger ausgelastet als in der Anlage.
-4. **Stationsbelegung:** Eine Station ist je Werkstück `belegung_je_werkstueck_s` belegt (RASS1 136 s), nicht nur die Montagezeit.
-5. **Wiederkehrregel** bleibt offen, bis das Referenzpaket da ist (L-01). Für die Umlaufzeit gibt es eine Annahme (140 s, A-10).
-6. **Verteilungen** für das Szenario `unsicherheit`: `matsim.daten.zeiten.verteilung(<Parameterpfad>)`; die Szenariodatei nennt bisher nur Pickzeit und Hintransport.
+3. **Kommissionierung:** Werden die Quellbox-Fahrten der Robotinos simuliert, entstehen Vorlauf und Wechselpausen im Modell; sonst gilt die Formel im Kommentar zu `kommissionierplatz` in `anlage.yaml` (A-11).
+4. **Verteilungen** für das Szenario `unsicherheit`: `matsim.daten.zeiten.verteilung(<Parameterpfad>)`; die Szenariodatei nennt bisher nur Pickzeit und Hintransport (AP5).
 
 ## 6. Zeitansätze aus der Historie
 
@@ -409,9 +418,20 @@ Je Teil ist die Verteilung eingipflig und eng. Die Stichprobe 9178 bestätigt da
 
 Die Station ist je Werkstück deutlich länger belegt als die Montage dauert, weil Abdeckung auflegen (OpNo 320), bei RASS1 Einschalten und QR lesen und Ablegen auf das Band (OpNo 321) dazukommen (`stationsbelegung`, erster Start bis letztes Ende je Werkstück WPNo 1000): RASS1 136 s, RASS2 121 s, RASS3 63 s (n = 87, 87, 86).
 
-### 6.3 Kommissionierstation: nie zwei Aufträge gleichzeitig
+### 6.3 Kommissionierstation: eine Charge zur Zeit, Vorlauf und Quellboxwechsel
 
 Geprüft für alle 229 Kommissionieraufträge der Historie: Der Zeitraum erster Pick-Start bis letztes Pick-Ende überlappt bei keinem Paar (`kommissionier_ueberlappungen`). Auch Einzelschritte zweier Aufträge überlappen nie (749 Picks). Die Kommissionierstation bearbeitet also eine Charge zur Zeit (A-04 ist damit aus der Historie belegt). Die Buchungskennzeichen an Ressource 19 (B-12) widersprechen dem nicht, sie werden nur nicht zurückgesetzt.
+
+Eine Charge belegt die Kommissionierung aber länger als die Summe ihrer Picks (`kommissioniervorlauf`, `pickluecken`):
+
+| Zeitanteil | n | Median | q10 / q90 | 09.11.2026 |
+|---|---:|---:|---:|---|
+| Vorlauf: Anlage des Auftrags (`tblfinorder.PlannedStart`) bis erster Pick | 229 | 264 s | 186 / 786 s | 240, 386, 269 s |
+| Pick je Teil (OpNo 220) | 748 | 23 s | 21 / 25 s | 22 bis 26 s |
+| Lücke zum nächsten Pick, gleiche Quellbox | 297 | 0 s | 0 / 1 s | 0 s |
+| Lücke zum nächsten Pick, andere Quellbox | 223 | 62 s | 0 / 293 s | 49, 131, 1, 0, 215, 150, 35, 104 s |
+
+Im Vorlauf bringen die Robotinos Zielbox und erste Quellbox an die Station (Snapshot 15:22 und 15:25: für 9179 kam Quellbox 4 um 15:21:03, Quellbox 3 um 15:22:44, Zielbox 18 um 15:24:22, erster Pick um 15:24:23). Beim Wechsel der Quellbox wartet die Station auf die nächste Box; 0 s heißt, sie stand schon an einem anderen Band (bis zu 3 Boxen gleichzeitig, B-12). Je Auftrag werden im Median 2 verschiedene Quellboxen gebraucht (1 bis 5). Für eine Simulation ohne Quellbox-Fahrten ergibt sich die Belegung einer Charge damit näherungsweise aus Vorlauf + Teile × Pickzeit + (Quellboxen − 1) × Wechselpause (A-11); in der Historie gab es 223 Wechsel bei 195 zusätzlichen Quellboxen, weil Boxen auch abwechselnd genutzt werden.
 
 ### 6.4 Fahrzeuge aus `tblmachinereport`
 

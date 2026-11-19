@@ -50,9 +50,9 @@ Vier Schnittstellen sind bereits als Dateien festgelegt, damit alle parallel sta
 | Baustein | Stand |
 |---|---|
 | Dump-Import nach SQLite, Snapshot-Vergleich, Bestands- und Reservierungsauswertung | lauffähig, an allen sechs Dumps getestet |
-| Zeitansätze aus der Schritthistorie | Median und Quantile lauffähig; Verteilungen für das Unsicherheitsszenario offen |
-| Live-Lesezugriff | Code vorhanden, im Labornetz noch nicht ausgeführt |
-| `config/anlage.yaml` | erster Stand mit Herkunftsangabe je Wert; drei Parameter offen |
+| Zeitansätze aus der Schritthistorie | Median und Quantile lauffähig; empirische Verteilungen für das Unsicherheitsszenario in `data/processed/zeitverteilungen.json` |
+| Datenbankzugriff (nur lesend) | gegen eine lokale MariaDB mit allen sechs Dumps geprüft, alle Tabellen zeilengleich mit dem Import; Labordatenbank nicht nötig |
+| `config/anlage.yaml` | vollständig mit Herkunft je Wert, von AP3 freigegeben; offen nur die Wiederkehrregel (Referenzpaket) |
 | Szenario-Dateien | Schema fest, Zahlenwerte sind Entwürfe |
 | Planungsschnittstelle, Ereignisprotokoll-Schema | festgelegt |
 | Prüfregeln Satzvollständigkeit und Chargenzulässigkeit | lauffähig, mit absichtlich fehlerhaften Fällen getestet |
@@ -85,7 +85,7 @@ Dumps ablegen: Die sechs SQL-Dumps aus dem Kursmaterial (`MES_database_snapschot
 .venv\Scripts\python -m ruff check .
 ```
 
-Erwartetes Ergebnis: Der Import erzeugt sechs SQLite-Dateien in `data/interim/` mit je 62 Tabellen. `pytest` meldet 20 bestandene und 25 erwartbar fehlschlagende Tests (`xfailed`); letztere sind die Invarianten der Simulation, die scharf werden, sobald die Simulation existiert. Ohne Dumps werden die Datentests übersprungen. Der Smoke-Test endet mit „Smoke-Test bestanden“ und simuliert nichts.
+Erwartetes Ergebnis: Der Import erzeugt sechs SQLite-Dateien in `data/interim/` mit je 62 Tabellen. `pytest` meldet mit den Dumps 61 bestandene, 2 übersprungene (Vergleich mit einer MariaDB, nur wenn eine erreichbar ist) und 25 erwartbar fehlschlagende Tests (`xfailed`); letztere sind die Invarianten der Simulation, die scharf werden, sobald die Simulation existiert. Ohne Dumps werden die Datentests übersprungen. Der Smoke-Test endet mit „Smoke-Test bestanden“ und simuliert nichts.
 
 Live-Zugriff (optional, nur im Labornetz, nur lesend): `.env.example` nach `.env` kopieren, die Zugangsdaten aus den Kursunterlagen eintragen und das Extra installieren.
 

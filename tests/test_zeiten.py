@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import random
+import statistics
 
 import pytest
 
@@ -93,3 +94,18 @@ def test_festwerte_in_anlage_yaml_passen_zu_den_daten(snapshots):
         wert(anlage, "fahrzeuge.fahrauftrag_s")
         == zeiten.verteilung("fahrzeuge.fahrauftrag_s").median
     )
+
+
+@pytest.mark.dumps
+def test_kommissionierung_vorlauf_und_quellboxwechsel(snapshots):
+    """Werte für Issue #19: Vorlauf bis zum ersten Pick und Pausen beim Quellboxwechsel."""
+    letzter = snapshots["1557"]
+    vorlauf = zeiten.kommissioniervorlauf(letzter)
+    assert len(vorlauf) == 229 and min(vorlauf) > 0
+    gleich, wechsel = zeiten.pickluecken(letzter)
+    assert (len(gleich), len(wechsel)) == (297, 223)
+    assert max(gleich) <= 2  # gleiche Quellbox: der nächste Pick folgt sofort
+    anlage = lade_anlage()
+    assert wert(anlage, "kommissionierplatz.vorlauf_s") == statistics.median(vorlauf)
+    assert wert(anlage, "kommissionierplatz.quellboxwechsel_s") == statistics.median(wechsel)
+    assert wert(anlage, "kommissionierplatz.quellboxen_je_auftrag") == 2
