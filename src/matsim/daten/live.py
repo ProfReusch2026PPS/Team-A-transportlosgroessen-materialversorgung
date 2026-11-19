@@ -1,17 +1,25 @@
-"""Lesender Live-Zugriff auf die MES-Datenbank im Labornetz.
+"""Lesender Zugriff auf eine MariaDB mit dem MES4-Schema.
 
-Zugangsdaten kommen ausschließlich aus Umgebungsvariablen (``DB_HOST``, ``DB_USER``,
-``DB_PASSWORD``, ``DB_NAME``), z. B. aus einer lokalen, nicht versionierten ``.env``.
-Es werden nur ``SELECT``-Abfragen ausgeführt.
+Das ist entweder die Labordatenbank (nur im Labornetz erreichbar) oder eine lokale MariaDB, in
+die die Dumps des Dozenten geladen sind (Anleitung: docs/projekt/datenmodell-mes.md, Abschnitt
+4.3). Zugangsdaten kommen ausschließlich aus Umgebungsvariablen (``DB_HOST``, ``DB_USER``,
+``DB_PASSWORD``, ``DB_NAME``, optional ``DB_PORT``), z. B. aus einer lokalen, nicht versionierten
+``.env``. Es werden nur ``SELECT``-Abfragen ausgeführt.
 """
 
 from __future__ import annotations
 
 import os
 import re
+import sqlite3
+from collections import Counter
+from dataclasses import dataclass
+from datetime import date, datetime, time, timedelta
+from decimal import Decimal
 from pathlib import Path
 
 from matsim.daten.dump_import import PERSONENBEZOGENE_TABELLEN
+from matsim.pfade import WURZEL
 
 _VARIABLEN = ("DB_HOST", "DB_USER", "DB_PASSWORD", "DB_NAME")
 _VERBOTEN = re.compile(
@@ -25,7 +33,7 @@ class NurLesenFehler(PermissionError):
     """Die Abfrage ist kein reines SELECT oder berührt eine gesperrte Tabelle."""
 
 
-def lade_env(pfad: Path = Path(".env")) -> None:
+def lade_env(pfad: Path = WURZEL / ".env") -> None:
     """Liest ``SCHLUESSEL=wert``-Zeilen aus einer ``.env`` in die Umgebung (ohne zu überschreiben)."""
     if not pfad.exists():
         return
@@ -54,8 +62,11 @@ def pruefe_nur_lesend(sql: str) -> None:
             raise NurLesenFehler(f"{tabelle} enthält personenbezogene Daten und ist gesperrt")
 
 
-def verbinde():
-    """Öffnet eine Verbindung mit den Werten aus der Umgebung. Benötigt das Extra ``live``."""
+def verbinde(datenbank: str | None = None):
+    """Öffnet eine Verbindung mit den Werten aus der Umgebung. Benötigt das Extra ``live``.
+
+    ``datenbank`` ersetzt ``DB_NAME``, etwa um lokal zwischen den sechs Snapshots zu wechseln.
+    """
     lade_env()
     fehlend = [name for name in _VARIABLEN if not os.environ.get(name)]
     if fehlend:
@@ -66,9 +77,10 @@ def verbinde():
         raise RuntimeError('Paket "mariadb" fehlt: pip install -e ".[live]"') from fehler
     return mariadb.connect(
         host=os.environ["DB_HOST"],
+        port=int(os.environ.get("DB_PORT") or 3306),
         user=os.environ["DB_USER"],
         password=os.environ["DB_PASSWORD"],
-        database=os.environ["DB_NAME"],
+        database=datenbank or os.environ["DB_NAME"],
     )
 
 
@@ -130,3 +142,76 @@ def vergleiche_mit_snapshot(snapshot, verbindung=None) -> list[tuple[str, int, i
     finally:
         if eigene:
             verbindung.close()
+
+
+def _normalisiere(wert: object) -> object:
+    """Bringt einen MariaDB-Wert in die Darstellung des SQLite-Imports."""
+    if isinstance(wert, datetime):
+        return wert.strftime("%Y-%m-%d %H:%M:%S")
+    if isinstance(wert, date):
+        return wert.isoformat()
+    if isinstance(wert, timedelta):
+        sekunden = int(wert.total_seconds())
+        return f"{sekunden // 3600:02d}:{sekunden % 3600 // 60:02d}:{sekunden % 60:02d}"
+    if isinstance(wert, time):
+        return wert.strftime("%H:%M:%S")
+    if isinstance(wert, Decimal):
+        return float(wert)
+    if isinstance(wert, (bytes, bytearray)):
+        return bytes(wert).decode("utf-8", errors="replace")
+    if isinstance(wert, float) and wert.is_integer():
+        return wert
+    return wert
+
+
+@dataclass(frozen=True)
+class Inhaltsvergleich:
+    tabelle: str
+    zeilen_db: int
+    zeilen_snapshot: int
+    nur_db: int
+    nur_snapshot: int
+    beispiel: tuple | None  # eine abweichende Zeile aus der Datenbank, falls vorhanden
+
+    @property
+    def gleich(self) -> bool:
+        return self.nur_db == 0 and self.nur_snapshot == 0
+
+
+def vergleiche_inhalt(
+    snapshot: sqlite3.Connection, verbindung, tabellen: tuple[str, ...] | None = None
+) -> list[Inhaltsvergleich]:
+    """Vergleicht je Tabelle alle Zeilen der Datenbank mit dem SQLite-Import als Multimenge.
+
+    Damit wird der eigene Dump-Import (``matsim.daten.dump_import``) unabhängig geprüft: Die
+    Datenbank hat den Dump mit dem MariaDB-Parser gelesen, der Import mit unserem eigenen.
+    Werte werden vorher normalisiert (Zeitpunkte als Text, Dezimalzahlen als Gleitkomma).
+    Ohne ``tabellen`` werden alle Tabellen des Snapshots verglichen.
+    """
+    if tabellen is None:
+        tabellen = tuple(
+            name
+            for (name,) in snapshot.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'tbl%' "
+                "ORDER BY name"
+            )
+        )
+    ergebnis = []
+    for tabelle in tabellen:
+        db = Counter(
+            tuple(_normalisiere(w) for w in zeile)
+            for zeile in lies(f"SELECT * FROM {tabelle}", verbindung=verbindung)
+        )
+        lokal = Counter(snapshot.execute(f"SELECT * FROM {tabelle}").fetchall())
+        nur_db, nur_snapshot = db - lokal, lokal - db
+        ergebnis.append(
+            Inhaltsvergleich(
+                tabelle,
+                sum(db.values()),
+                sum(lokal.values()),
+                sum(nur_db.values()),
+                sum(nur_snapshot.values()),
+                next(iter(nur_db), None),
+            )
+        )
+    return ergebnis

@@ -265,10 +265,48 @@ Die Zahlen unten stammen aus dem Snapshot 15:57 und sind in `tests/test_qualitae
 - Umgang: keiner.
 - Modellfolge: Satz wird nur vollständig in einer Box geliefert (Abschnitt 5.4).
 
-### 4.3 Stichprobe und Live-Zugriff
+### 4.3 Stichprobe
 
 - Stichprobe von Hand: Auftrag 9178 vom Auslagern bis zum Einlagern, mit Abgleich gegen alle sechs Snapshots, in [stichprobe-auftrag-9178.md](stichprobe-auftrag-9178.md). Wiederholbar mit `python -m matsim.daten stichprobe 9178`.
-- Live-Zugriff: Der Befehl `python -m matsim.daten live-vergleich` vergleicht die Zeilenzahlen von 17 Tabellen der Live-Datenbank mit einem Snapshot. Er führt nur `SELECT COUNT(*)` aus und ist im Labornetz noch nicht gelaufen (L-10).
+- Datenbankzugriff ohne Labor: siehe 4.4.
+
+### 4.4 Prüfung des Imports gegen eine lokale MariaDB
+
+Grundlage der Arbeit sind die sechs Dumps des Dozenten, nicht die laufende Labordatenbank. Die Labordatenbank (Zugang aus den Kursunterlagen) ist nur im Labornetz erreichbar. Geprüft werden musste deshalb etwas anderes: ob unser eigener Dump-Import (`matsim.daten.dump_import`) die Dumps richtig liest und ob der Code für den lesenden Datenbankzugriff (`matsim.daten.live`) funktioniert. Dafür werden die Dumps in eine lokale MariaDB geladen, wie es die Readme des Dozenten vorschlägt, und mit dem SQLite-Import verglichen. MariaDB liest den Dump mit ihrem eigenen Parser; stimmen beide Ergebnisse überein, ist der Import unabhängig bestätigt.
+
+**Ergebnis (19.11.2026, MariaDB 10.11.10):** Für alle sechs Snapshots stimmen alle 62 Tabellen Zeile für Zeile überein, zusammen 1 038 524 Zeilen ohne eine Abweichung. Der Zugang mit einem Benutzer, der nur `SELECT` darf, funktioniert; Schreibversuche weist die Datenbank ab, und `matsim.daten.live` lässt sie gar nicht erst durch.
+
+| Snapshot | Tabellen | Zeilen | Tabellen mit Abweichung |
+|---|---:|---:|---:|
+| 15:16 | 62 | 172 816 | 0 |
+| 15:22 | 62 | 172 969 | 0 |
+| 15:25 | 62 | 173 007 | 0 |
+| 15:36 | 62 | 173 141 | 0 |
+| 15:41 | 62 | 173 214 | 0 |
+| 15:57 | 62 | 173 377 | 0 |
+
+**Nachvollziehen** (Windows, Git Bash; ohne Installation und ohne Adminrechte):
+
+1. MariaDB als ZIP von archive.mariadb.org laden (`mariadb-10.11.10-winx64.zip`, Prüfsumme aus `sha256sums.txt` vergleichen) und außerhalb des Repos entpacken.
+2. Datenverzeichnis anlegen und Server nur lokal starten:
+   ```text
+   bin\mariadb-install-db.exe --datadir=<ordner>\data --port=3307 --password=<lokales Passwort>
+   bin\mariadbd.exe --defaults-file=<ordner>\data\my.ini --bind-address=127.0.0.1 --console
+   ```
+3. Jeden Dump in eine eigene Datenbank laden. Die Dumps legen selbst `mes4` an und wechseln mit `USE` hinein; diese zwei Zeilen werden beim Einlesen herausgefiltert, die Datei bleibt unverändert. Danach die personenbezogenen Tabellen löschen:
+   ```text
+   mariadb -h 127.0.0.1 -P 3307 -u root -p -e "CREATE DATABASE mes4_1516"
+   sed -E '/^CREATE DATABASE /d; /^USE `/d' "DB_Export_2026.11.09_1516_….sql" | mariadb -h 127.0.0.1 -P 3307 -u root -p mes4_1516
+   mariadb -h 127.0.0.1 -P 3307 -u root -p -e "DROP TABLE mes4_1516.tblcustomer, mes4_1516.tblusercontrol"
+   ```
+4. Einen Benutzer nur mit Leserecht anlegen (`GRANT SELECT ON mes4_1516.* …`) und in die lokale `.env` eintragen: `DB_HOST=127.0.0.1`, `DB_PORT=3307`, `DB_USER`, `DB_PASSWORD`, `DB_NAME=mes4_1557`.
+5. Treiber installieren und vergleichen:
+   ```text
+   .venv\Scripts\python -m pip install -e ".[live]"
+   .venv\Scripts\python -m matsim.daten live-vergleich 2026-11-09_1516 --datenbank mes4_1516 --inhalt
+   ```
+
+`tests/test_live.py` führt den Vergleich für 15:57 aus, wenn eine Datenbank erreichbar ist, sonst wird er übersprungen. Im Labornetz genügt es, in der `.env` die Werte aus den Kursunterlagen einzutragen; derselbe Befehl vergleicht dann die Labordatenbank mit einem Snapshot. Nötig für die Projektarbeit ist das nicht (L-10).
 
 ## 5. Materialpfad und Beladungsregeln
 
