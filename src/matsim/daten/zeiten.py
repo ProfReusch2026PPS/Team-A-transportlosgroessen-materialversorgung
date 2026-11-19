@@ -192,6 +192,55 @@ def kommissionier_ueberlappungen(verbindung: sqlite3.Connection) -> tuple[int, l
     return len(spannen), paare
 
 
+def kommissioniervorlauf(verbindung: sqlite3.Connection) -> list[float]:
+    """Anlage des Kommissionierauftrags (``tblfinorder.PlannedStart``) bis Start des ersten Picks.
+
+    In dieser Zeit bringen die Robotinos Zielbox und erste Quellbox(en) an die Station. Bildet
+    die Simulation diese Fahrten selbst ab, entsteht der Vorlauf im Modell und darf nicht
+    zusätzlich angesetzt werden.
+    """
+    from matsim.daten.materialpfad import umsetzungen
+
+    erster: dict[int, datetime] = {}
+    for u in umsetzungen(verbindung):
+        if u.start is not None and (u.ono not in erster or u.start < erster[u.ono]):
+            erster[u.ono] = u.start
+    angelegt = {
+        ono: datetime.strptime(zeit, _FORMAT)
+        for ono, zeit in verbindung.execute(
+            "SELECT ONo, PlannedStart FROM tblfinorder WHERE PlannedStart IS NOT NULL "
+            "AND PlannedStart <> ''"
+        )
+    }
+    return [
+        (start - angelegt[ono]).total_seconds()
+        for ono, start in sorted(erster.items())
+        if ono in angelegt
+    ]
+
+
+def pickluecken(verbindung: sqlite3.Connection) -> tuple[list[float], list[float]]:
+    """Lücken zwischen zwei aufeinanderfolgenden Picks desselben Auftrags.
+
+    Liefert ``(gleiche Quellbox, Wechsel der Quellbox)``. Beim Wechsel wartet die Station, bis die
+    nächste Quellbox an einem Band steht; steht sie schon bereit, ist die Lücke 0 s.
+    """
+    from matsim.daten.materialpfad import umsetzungen
+
+    je_auftrag: dict[int, list] = {}
+    for u in umsetzungen(verbindung):
+        if u.start is not None and u.ende is not None:
+            je_auftrag.setdefault(u.ono, []).append(u)
+    gleich: list[float] = []
+    wechsel: list[float] = []
+    for picks in je_auftrag.values():
+        picks.sort(key=lambda u: u.start)
+        for a, b in zip(picks, picks[1:], strict=False):
+            luecke = (b.start - a.ende).total_seconds()
+            (gleich if a.quellbox == b.quellbox else wechsel).append(luecke)
+    return gleich, wechsel
+
+
 # ---------------------------------------------------------------------------------------------
 # Fahrzeuge: Statusmeldungen der Robotinos (tblmachinereport)
 # ---------------------------------------------------------------------------------------------
@@ -463,9 +512,27 @@ def zeitverteilung(
 
 def leite_verteilungen_ab(verbindung: sqlite3.Connection) -> dict[str, Zeitverteilung]:
     """Alle Verteilungen, benannt nach dem Parameterpfad in ``config/anlage.yaml``."""
+    from matsim.daten import materialpfad
+
     verteilungen = {
         "kommissionierplatz.pickzeit_je_teil_s": zeitverteilung(
             verbindung, 220, 19, "kommissionierplatz.pickzeit_je_teil_s"
+        ),
+        "kommissionierplatz.vorlauf_s": bereinige(
+            "kommissionierplatz.vorlauf_s",
+            "tblfinorder.PlannedStart bis erster Pick-Start je Kommissionierauftrag",
+            kommissioniervorlauf(verbindung),
+        ),
+        "kommissionierplatz.quellboxwechsel_s": bereinige(
+            "kommissionierplatz.quellboxwechsel_s",
+            "Ende eines Picks bis Start des nächsten Picks desselben Auftrags aus einer anderen "
+            "Quellbox (tblfinstepparameter Parameter 3)",
+            pickluecken(verbindung)[1],
+        ),
+        "kommissionierplatz.quellboxen_je_auftrag": bereinige(
+            "kommissionierplatz.quellboxen_je_auftrag",
+            "Anzahl verschiedener Quellboxen je Kommissionierauftrag (keine Dauer, Stückzahl)",
+            [float(n) for n in materialpfad.quellboxen_je_auftrag(verbindung).values()],
         ),
         "werkstueckumlauf.auslagern_s": zeitverteilung(
             verbindung, 212, 1, "werkstueckumlauf.auslagern_s"
