@@ -4,9 +4,9 @@ Fünf Pakete für fünf Personen. Jedes Paket hat eigene Ordner; niemand ändert
 
 | Paket | Person | Vertretung |
 |---|---|---|
-| AP1 Daten und MES-Modell | TODO: Name | TODO: Name |
-| AP2 Methodik und Literatur | TODO: Name | TODO: Name |
-| AP3 Simulationskern | TODO: Name | TODO: Name |
+| AP1 Daten und MES-Modell | Maher Darweesh | TODO: Name |
+| AP2 Methodik und Literatur | Noah Fiedler | TODO: Name |
+| AP3 Simulationskern | Mehemt Örücü, Laurens Rüther | TODO: Name |
 | AP4 Planungsverfahren | Luis Kruse | TODO: Name |
 | AP5 Experimente und Auswertung | TODO: Name | TODO: Name |
 
@@ -31,7 +31,7 @@ Fünf Pakete für fünf Personen. Jedes Paket hat eigene Ordner; niemand ändert
 | **Abnahme** | Import und Datentests laufen auf einem frischen Klon mit den Dumps; jeder Wert in `anlage.yaml` hat Herkunft und Beleg; Lücken L-02, L-03, L-05 bis L-08 sind geklärt oder begründet als Lücke ausgewiesen; Rohdaten unverändert (Prüfsummen) |
 | **Anforderungen** | R-06 bis R-13, R-44, R-45 |
 
-Startpunkte: `matsim.daten.zeiten.zeitverteilung` (noch offen), Auswertung von `tblmachinereport` für Fahrzeugbelegung, Klärung der gebuchten Plätze an Ressource 19, Bimodalität der Montagezeiten.
+Stand: abgeschlossen. Zeitverteilungen (`matsim.daten.zeiten.zeitverteilung`, `data/processed/zeitverteilungen.json`), Fahrzeugbelegung aus `tblmachinereport` (L-03, L-06), gebuchte Plätze an Ressource 19 (L-05) und Montagezeiten sind in `datenmodell-mes.md` ausgewertet. Offen bleibt nur `werkstueckumlauf.wiederkehrregel` in `config/anlage.yaml`, die das Referenzpaket festlegt (L-01, AP3).
 
 ## AP2 Methodik und Literatur
 
