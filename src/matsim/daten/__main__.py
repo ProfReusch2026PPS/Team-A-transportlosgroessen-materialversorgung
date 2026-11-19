@@ -10,6 +10,7 @@ Beispiele::
     python -m matsim.daten stichprobe 9178
     python -m matsim.daten zeiten
     python -m matsim.daten live-vergleich 2026-11-09_1557
+    python -m matsim.daten live-vergleich 2026-11-09_1516 --datenbank mes4_1516 --inhalt
 """
 
 from __future__ import annotations
@@ -147,12 +148,31 @@ def _live_vergleich(argumente: argparse.Namespace) -> None:
     from matsim.daten import live
 
     snapshot = sqlite3.connect(_sqlite_pfad(argumente.snapshot))
+    verbindung = live.verbinde(argumente.datenbank)
     try:
-        print(f"{'Tabelle':<24}{'live':>10}{'Snapshot':>10}{'Differenz':>11}")
-        for tabelle, zeilen_live, zeilen_snapshot in live.vergleiche_mit_snapshot(snapshot):
-            differenz = zeilen_live - zeilen_snapshot
-            print(f"{tabelle:<24}{zeilen_live:>10}{zeilen_snapshot:>10}{differenz:>+11}")
+        if argumente.inhalt:
+            ergebnisse = live.vergleiche_inhalt(snapshot, verbindung)
+            print(f"{'Tabelle':<28}{'Datenbank':>11}{'Snapshot':>10}{'nur DB':>8}{'nur Snap.':>11}")
+            for e in ergebnisse:
+                if not e.gleich or argumente.alle:
+                    print(
+                        f"{e.tabelle:<28}{e.zeilen_db:>11}{e.zeilen_snapshot:>10}"
+                        f"{e.nur_db:>8}{e.nur_snapshot:>11}"
+                    )
+            abweichend = [e for e in ergebnisse if not e.gleich]
+            print(
+                f"{len(ergebnisse)} Tabellen, {sum(e.zeilen_db for e in ergebnisse)} Zeilen, "
+                f"{len(abweichend)} Tabellen mit Abweichung"
+            )
+            return
+        print(f"{'Tabelle':<24}{'Datenbank':>10}{'Snapshot':>10}{'Differenz':>11}")
+        for tabelle, zeilen_db, zeilen_snapshot in live.vergleiche_mit_snapshot(
+            snapshot, verbindung
+        ):
+            differenz = zeilen_db - zeilen_snapshot
+            print(f"{tabelle:<24}{zeilen_db:>10}{zeilen_snapshot:>10}{differenz:>+11}")
     finally:
+        verbindung.close()
         snapshot.close()
 
 
@@ -190,9 +210,15 @@ def main() -> None:
     zeitbefehl.add_argument("snapshot", nargs="?", default=LETZTER_SNAPSHOT)
     zeitbefehl.set_defaults(funktion=_zeiten)
     live_befehl = befehle.add_parser(
-        "live-vergleich", help="Zeilenzahlen live (nur lesend, Labornetz) gegen einen Snapshot"
+        "live-vergleich",
+        help="MariaDB (Labor oder lokal, nur lesend) gegen einen Snapshot vergleichen",
     )
     live_befehl.add_argument("snapshot", nargs="?", default=LETZTER_SNAPSHOT)
+    live_befehl.add_argument("--datenbank", help="ersetzt DB_NAME, z. B. mes4_1516 (lokal)")
+    live_befehl.add_argument(
+        "--inhalt", action="store_true", help="alle Tabellen Zeile für Zeile vergleichen"
+    )
+    live_befehl.add_argument("--alle", action="store_true", help="auch gleiche Tabellen zeigen")
     live_befehl.set_defaults(funktion=_live_vergleich)
     argumente = parser.parse_args()
     argumente.funktion(argumente)
