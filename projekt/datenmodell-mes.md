@@ -387,6 +387,29 @@ Noch offen ist nur `werkstueckumlauf.wiederkehrregel` (Referenzpaket, L-01). Die
 3. **Kommissionierung:** Werden die Quellbox-Fahrten der Robotinos simuliert, entstehen Vorlauf und Wechselpausen im Modell; sonst gilt die Formel im Kommentar zu `kommissionierplatz` in `anlage.yaml` (A-11).
 4. **Verteilungen** für das Szenario `unsicherheit`: `matsim.daten.zeiten.verteilung(<Parameterpfad>)`; die Szenariodatei nennt bisher nur Pickzeit und Hintransport (AP5).
 
+### 5.6 Fachliche Eingabeprüfung der Anlagenbeschreibung (S1, Issue #26)
+
+Der vorhandene Lader `matsim.modell.anlage.lade_anlage` prüft die Anlagenbeschreibung beim
+Laden. Das Schema bleibt unverändert; die Prüfungen wenden die dokumentierten Beladungsregeln
+auf die jeweils eingelesenen Werte an.
+
+- Boxpositionen und Komponentenstückzahlen eines Satzes müssen positive ganze Zahlen sein.
+  Bestands- und Ressourcenanzahlen dürfen null sein. Texte, Wahrheitswerte und Nachkommazahlen
+  zählen nicht als ganze Zahlen.
+- Gesetzte Sekundenwerte (auch die Montagezeit je Teilenummer) müssen endliche, nichtnegative
+  Zahlen sein. Ein dokumentierter offener Wert (`wert: null`, `herkunft: offen`, mit `beleg`)
+  bleibt offen und ist nicht als Zahl oder Regel verwendbar. Das gilt auch für die Wiederkehrregel.
+- Jeder Materialsatz enthält nur bekannte und für seine Station zulässige Komponenten. Ein
+  ganzer Satz muss in eine Box passen. Die konfigurierte Obergrenze ist zulässig, wenn
+  `max_saetze_je_box × Positionen je Satz ≤ box.positionen`. Für einen Satz aus zwei Teilen
+  sind bei acht Boxpositionen höchstens vier Sätze zulässig; eine niedrigere Grenze ist erlaubt.
+
+Fehler werden ohne automatische Korrektur als `AnlagenFehler` mit Parameterpfad und Begründung
+gemeldet, zum Beispiel `beladung.max_saetze_je_box.RASS1: 5 Sätze × 2 Positionen überschreiten
+box.positionen (8)`. Eine ladbare Konfiguration ist nicht automatisch startbereit und kann
+bewusst zu wenig Material oder Ressourcen für einen Versuch enthalten. Die Prüfung deckt weder
+den konkreten Versuchsbedarf noch die Entscheidungen des Planers ab.
+
 ## 6. Zeitansätze aus der Historie
 
 Zeitraum 11.06.2025 bis 09.11.2026, 552 abgeschlossene Aufträge. Dauer = `End` minus `Start` je Schritt, Filter wie in B-13 (Start und Ende vorhanden, `ErrorRetVal = 0`). Nach [Kapitel 12](../12-smart-factory-mes-und-zielorientierte-prozessverbesserung.md), Abschnitt „Historische Istzeiten als Rückfluss“, werden Median und Quantile statt des Mittelwerts verwendet, weil einzelne Störungen den Mittelwert verzerren. Alle Werte erzeugt `python -m matsim.daten zeiten`; die Funktionen stehen in `src/matsim/daten/zeiten.py`, die Tests in `tests/test_zeiten.py`.
