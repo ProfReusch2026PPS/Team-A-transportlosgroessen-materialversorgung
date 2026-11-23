@@ -549,3 +549,36 @@ Quelle: Snapshot 15:57 (Ruhezustand nach Produktionsende, keine Reservierungen, 
 | vollständige Produkte WPNo 1000 aus dem Bestand | 4 | begrenzt durch 800 und 814 (L-11) |
 
 Die Werte stehen mit Herkunft in `config/anlage.yaml` (`box`, `materiallager`) und werden in `tests/test_bestand.py` gegen den Snapshot geprüft.
+
+### 7.3 Bedarfsdeckung vor dem Simulationslauf (Issue #25)
+
+`matsim.daten.bedarfsdeckung.pruefe_bedarfsdeckung` summiert die Komponenten konkreter
+`Anforderung`-Objekte je Teilenummer. Der Bericht weist Bedarf, freien Bestand und Fehlmenge aus.
+Jeder Bedarfsbeitrag bleibt über die Anforderungs-ID und Station nachvollziehbar.
+
+```python
+from matsim.daten.bedarfsdeckung import pruefe_bedarfsdeckung
+
+bericht = pruefe_bedarfsdeckung(
+    anforderungen,
+    freier_anfangsbestand,
+    datenstand="MES-Snapshot 2026-11-09 15:57",
+    anlage_abweichungen=szenario.get("anlage_abweichungen", {}),
+)
+print(bericht.als_json())
+```
+
+- Als Basis dient nur aufbereiteter freier Bestand, z. B. `Startbestand.teile_frei` oder
+  `materiallager.anfangsbestand` aus der geladenen Anlagenbeschreibung (nur die Mengen je
+  Teilenummer). Reservierte Teile und Teile ohne Ort werden weder hinzugezählt noch erneut
+  abgezogen. Ein fehlender Eintrag zählt als null.
+- Ein Szenarioeintrag wie `materiallager.anfangsbestand.800: 12` **ersetzt** die Menge für Teil
+  800, statt 12 Stück hinzuzuzählen. Basis- und Szenariowert werden getrennt als
+  `bestandsannahmen` ausgewiesen. Andere Anlagenabweichungen, etwa die Zahl der Boxen, sind für
+  diese Mengenprüfung unerheblich. Ohne Abweichungen kann der Parameter entfallen.
+- Mit dem dokumentierten Anfangsbestand sind vier Standardprodukte mengenmäßig gedeckt. Bei zwölf
+  fehlen für 800 und 814 je acht Stück, für 811, 813 und 831 je sieben. Bestandsmangel wird berichtet,
+  nicht als ungültiges Szenario abgewiesen.
+- Der Bericht benötigt weder Datenbankzugriff noch einen Simulationslauf. Er rechnet keinen
+  Nachschub ein und trifft keine Aussage über Lieferzeitpunkte oder Fertigstellung. Die Einbindung
+  in den Szenario-Runner und die Entscheidung über die Versuchseingaben bleiben mit AP5 abzustimmen.
