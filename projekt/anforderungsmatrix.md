@@ -2,7 +2,7 @@
 
 Verantwortlich: AP2. Jede Anforderung aus [aufgabenstellung.md](aufgabenstellung.md) steht in genau einem Arbeitspaket. R-01 bis R-43 stammen aus dem Text zu Team A, R-44 bis R-53 aus den gemeinsamen Anforderungen und Abgaben.
 
-Status: **Schnittstelle** = als Typ, Datei oder Schema festgelegt; **teilweise** = lauffähiger Anfang vorhanden; **Gerüst** = Signatur ohne Logik; **Entwurf** = dokumentiert, noch nicht entschieden; **offen** = noch nichts vorhanden.
+Status: **erfüllt** = Abnahmekriterium des Pakets erreicht; **Schnittstelle** = als Typ, Datei oder Schema festgelegt; **teilweise** = lauffähiger Anfang vorhanden; **Gerüst** = Signatur ohne Logik; **Entwurf** = dokumentiert, noch nicht entschieden; **offen** = noch nichts vorhanden.
 
 ## Ziel und Datenanalyse
 
@@ -13,19 +13,19 @@ Status: **Schnittstelle** = als Typ, Datei oder Schema festgelegt; **teilweise**
 | R-03 | Materialsatz nur vollständig in derselben Box; Teillieferungen erfüllen den Bedarf nicht | AP4 | `satz_vollstaendig_in_box`, `tests/test_pruefregeln.py`; Einhaltung durch jedes Verfahren | teilweise (Prüfregel fertig, Verfahren Gerüst) |
 | R-04 | Mehrere Sätze nur gemeinsam, soweit Boxbelegung und Anlagenregeln es erlauben | AP4 | `pruefe_charge`; Unit-Tests je Verfahren | teilweise (Prüfregel fertig, Verfahren Gerüst) |
 | R-05 | Regeln anhand des Materialpfads prüfen und belegen | AP2 | `datenmodell-mes.md`, Abschnitt 5; Annahme A-06 | Entwurf, Bestätigung offen |
-| R-06 | Komponentenbedarfe untersuchen | AP1 | Befund B-04, `config/anlage.yaml` | teilweise |
-| R-07 | Box- und Pufferbelegungen untersuchen | AP1 | Befunde B-03, B-09 bis B-11, `matsim.daten.bestand` | teilweise |
-| R-08 | Reservierungen untersuchen | AP1 | Befund B-12, Abschnitt 7 in `datenmodell-mes.md` | teilweise |
-| R-09 | Doppelzählungen von Box und Inhalt vermeiden | AP1 | Zählregeln, `tests/test_dump_import.py` | teilweise |
-| R-10 | Reservierungen ohne zuordenbaren Auftrag bleiben ungeklärt, kein freier Bestand | AP1 | `reservierungen_ohne_auftrag`, Lücke L-05 | teilweise |
-| R-11 | Historische Bestandsfolgen nur bei geeigneten Aufzeichnungen; sonst Datenlücke ausweisen | AP1 | Lücke L-04 | teilweise |
+| R-06 | Komponentenbedarfe untersuchen | AP1 | Befund B-04, `config/anlage.yaml` | erfüllt |
+| R-07 | Box- und Pufferbelegungen untersuchen | AP1 | Befunde B-03, B-09 bis B-11, `matsim.daten.bestand` | erfüllt |
+| R-08 | Reservierungen untersuchen | AP1 | Befund B-12, Abschnitt 7 in `datenmodell-mes.md` | erfüllt |
+| R-09 | Doppelzählungen von Box und Inhalt vermeiden | AP1 | Zählregeln, `tests/test_dump_import.py` | erfüllt |
+| R-10 | Reservierungen ohne zuordenbaren Auftrag bleiben ungeklärt, kein freier Bestand | AP1 | `reservierungen_ohne_auftrag`, Lücke L-05 | erfüllt |
+| R-11 | Historische Bestandsfolgen nur bei geeigneten Aufzeichnungen; sonst Datenlücke ausweisen | AP1 | Lücke L-04 | erfüllt |
 
 ## Planungsverfahren
 
 | Nr. | Anforderung | AP | Nachweis | Status |
 |---|---|---|---|---|
-| R-12 | Komponentenstückzahlen, freie Bestände, Reservierungen, Boxkapazitäten und zulässige Inhalte als Daten bereitstellen | AP1 | `config/anlage.yaml` mit Herkunft | teilweise |
-| R-13 | Zeitansätze für Kommissionierung, Transport und Montage ableiten | AP1 | Befunde B-13, B-14, `matsim.daten.zeiten` | teilweise |
+| R-12 | Komponentenstückzahlen, freie Bestände, Reservierungen, Boxkapazitäten und zulässige Inhalte als Daten bereitstellen | AP1 | `config/anlage.yaml` mit Herkunft | erfüllt |
+| R-13 | Zeitansätze für Kommissionierung, Transport und Montage ableiten | AP1 | Befunde B-13, B-14, `matsim.daten.zeiten` | erfüllt |
 | R-14 | Vergleich: Einzelversorgung, Füllschwelle, Wartezeit oder Dringlichkeit | AP4 | V1, V2, V3 in `src/matsim/regeln/verfahren.py` | Gerüst |
 | R-15 | Eigene Verbesserung innerhalb mindestens einer Bündelungsregel | AP4 | V4; Kandidaten in `planungsverfahren.md` | Entwurf, Teamentscheidung offen |
 | R-16 | Restbedarf auch bei nicht erreichter Füllschwelle bearbeiten | AP4 | Restbedarfsregel, `naechste_wartefrist` | Schnittstelle, Regel offen |
@@ -71,8 +71,8 @@ Status: **Schnittstelle** = als Typ, Datei oder Schema festgelegt; **teilweise**
 
 | Nr. | Anforderung | AP | Nachweis | Status |
 |---|---|---|---|---|
-| R-44 | Datenqualitätsanalyse mit Befundregister, ausführbaren Prüfungen und manueller Stichprobe; Rohdaten unverändert | AP1 | `datenmodell-mes.md`, Abschnitt 4; Prüfsummen | teilweise |
-| R-45 | MES-Werte, abgeleitete Werte, Beobachtungen und Szenarioannahmen unterscheiden | AP1 | `herkunft` in `anlage.yaml` | Schnittstelle |
+| R-44 | Datenqualitätsanalyse mit Befundregister, ausführbaren Prüfungen und manueller Stichprobe; Rohdaten unverändert | AP1 | `datenmodell-mes.md`, Abschnitt 4; Prüfsummen | erfüllt |
+| R-45 | MES-Werte, abgeleitete Werte, Beobachtungen und Szenarioannahmen unterscheiden | AP1 | `herkunft` in `anlage.yaml` | erfüllt |
 | R-46 | Entscheidungsgrößen, Ziele, Nebenbedingungen, Modellgrenzen und Entscheidungshorizont definieren | AP2 | `planungsverfahren.md`, Abschnitt 2 | Entwurf |
 | R-47 | Hausarbeit mit Handlungsempfehlung und Gültigkeitsbedingungen | AP2 | `report/gliederung.md` | nur Gliederung |
 | R-48 | Überarbeitungen von Datenanalyse oder Modell dokumentieren und begründen | AP2 | `annahmen-und-datenluecken.md` | Schnittstelle |
