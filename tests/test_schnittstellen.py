@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
+import yaml
 
 from matsim import smoke
 from matsim.daten.live import NurLesenFehler, pruefe_nur_lesend
@@ -24,6 +27,91 @@ def test_anlage_laedt_und_kennzeichnet_offene_parameter():
     assert "werkstueckumlauf.wiederkehrregel" in offene_parameter(anlage)
     with pytest.raises(AnlagenFehler):
         wert(anlage, "werkstueckumlauf.wiederkehrregel")
+
+
+def _schreibe_anlage(
+    tmp_path: Path, aenderungen: dict[tuple[str | int, ...], object]
+) -> Path:
+    anlage = lade_anlage()
+    for pfad, neuer_wert in aenderungen.items():
+        knoten = anlage
+        for schluessel in pfad:
+            knoten = knoten[schluessel]
+        knoten["wert"] = neuer_wert
+    datei = tmp_path / "anlage.yaml"
+    datei.write_text(yaml.safe_dump(anlage, allow_unicode=True), encoding="utf-8")
+    return datei
+
+
+@pytest.mark.parametrize(
+    ("pfad", "neuer_wert", "meldung"),
+    [
+        (("box", "positionen"), 0, "positive ganze Zahl"),
+        (("box", "positionen"), True, "positive ganze Zahl"),
+        (("materiallager", "anfangsbestand", 800), -1, "nichtnegative ganze Zahl"),
+        (("fahrzeuge", "anzahl"), "2", "nichtnegative ganze Zahl"),
+        (("stationen", "RASS1", "uebergabeplaetze"), 1.5, "nichtnegative ganze Zahl"),
+        (("stationen", "RASS1", "materialsatz", 800), 0, "positive ganze Zahl"),
+        (("kommissionierplatz", "vorlauf_s"), -1, "endliche, nichtnegative Zahl"),
+        (("fahrzeuge", "fahrauftrag_s"), float("inf"), "endliche, nichtnegative Zahl"),
+        (("stationen", "RASS1", "montagezeit_s", 800), float("nan"), "endliche, nichtnegative Zahl"),
+        (("werkstueckumlauf", "bandsegment_s"), False, "endliche, nichtnegative Zahl"),
+        (("stationen", "RASS1", "zulaessige_teile"), [814], "nicht zulässig"),
+        (("stationen", "RASS1", "materialsatz", 800), 8, "ein Satz benötigt 9 Positionen"),
+        (("beladung", "max_saetze_je_box", "RASS1"), 5, "5 Sätze × 2 Positionen"),
+    ],
+)
+def test_anlage_lehnt_fachlich_ungueltige_werte_ab(tmp_path, pfad, neuer_wert, meldung):
+    datei = _schreibe_anlage(tmp_path, {pfad: neuer_wert})
+    fehlerpfad = {
+        ("stationen", "RASS1", "zulaessige_teile"): "stationen.RASS1.materialsatz.800",
+        ("stationen", "RASS1", "materialsatz", 800): (
+            "stationen.RASS1.materialsatz" if neuer_wert == 8 else "stationen.RASS1.materialsatz.800"
+        ),
+    }.get(pfad, ".".join(map(str, pfad)))
+
+    with pytest.raises(AnlagenFehler) as fehler:
+        lade_anlage(datei)
+    assert f"{fehlerpfad}:" in str(fehler.value)
+    assert meldung in str(fehler.value)
+
+
+@pytest.mark.parametrize("obergrenze", [2, 3])
+def test_anlage_erlaubt_geaenderte_gueltige_mengen_und_engpaesse(tmp_path, obergrenze):
+    datei = _schreibe_anlage(
+        tmp_path,
+        {
+            ("box", "positionen"): 9,
+            ("stationen", "RASS1", "materialsatz", 800): 2,
+            ("beladung", "max_saetze_je_box", "RASS1"): obergrenze,
+            ("materiallager", "anfangsbestand", 800): 0,
+            ("fahrzeuge", "anzahl"): 0,
+            ("kommissionierplatz", "vorlauf_s"): 0.0,
+        },
+    )
+
+    anlage = lade_anlage(datei)
+    assert wert(anlage, "beladung.max_saetze_je_box.RASS1") == obergrenze
+    assert wert(anlage, "materiallager.anfangsbestand.800") == 0
+    assert wert(anlage, "fahrzeuge.anzahl") == 0
+
+
+def test_anlage_meldet_fehlende_satzobergrenze_und_erhaelt_offene_dauer(tmp_path):
+    anlage = lade_anlage()
+    anlage["kommissionierplatz"]["vorlauf_s"] = {
+        "wert": None, "herkunft": "offen", "beleg": "Testdaten: Vorlauf noch nicht bekannt",
+    }
+    datei = tmp_path / "anlage.yaml"
+    datei.write_text(yaml.safe_dump(anlage), encoding="utf-8")
+    geladen = lade_anlage(datei)
+    assert "kommissionierplatz.vorlauf_s" in offene_parameter(geladen)
+    with pytest.raises(AnlagenFehler, match=r"kommissionierplatz\.vorlauf_s ist noch offen"):
+        wert(geladen, "kommissionierplatz.vorlauf_s")
+
+    del anlage["beladung"]["max_saetze_je_box"]["RASS1"]
+    datei.write_text(yaml.safe_dump(anlage), encoding="utf-8")
+    with pytest.raises(AnlagenFehler, match=r"beladung\.max_saetze_je_box\.RASS1: .* fehlt"):
+        lade_anlage(datei)
 
 
 def test_szenarien_decken_versuchsplan_ab():
