@@ -1,8 +1,9 @@
 """SimPy-Modell der Materialversorgung (AP3).
 
-Stand: Bauplan, Schritt 2. Fertig sind das Grundgerüst (Ressourcen, Zustand, Zeiten,
-Reihenfolge gleichzeitiger Ereignisse, Protokollhilfe) und die Kommissionierung. Die übrigen
-Prozesse folgen in den Schritten 3 bis 8 und lösen bis dahin ``NotImplementedError`` aus.
+Stand: Bauplan, Schritt 3. Fertig sind das Grundgerüst (Ressourcen, Zustand, Zeiten,
+Reihenfolge gleichzeitiger Ereignisse, Protokollhilfe), die Kommissionierung und der Hintransport
+bis zur Lieferung. Die übrigen Prozesse folgen in den Schritten 4 bis 8 und lösen bis dahin
+``NotImplementedError`` aus.
 
 Die Simulation verarbeitet die Entscheidungen eines Planungsverfahrens mit begrenzten
 Ressourcen. Sie übernimmt keine geplanten Fertigstellungen als Ergebnis und ruft das
@@ -181,7 +182,7 @@ class Simulation:
     def melde_anlass(self, art: Planungsanlass, detail: str = "") -> None:
         """Merkt einen Planungsanlass vor; geplant wird je Zeitpunkt einmal, zuletzt.
 
-        Stand Schritt 2: Die Anlässe werden nur gesammelt. Den Planungsaufruf dazu ergänzt
+        Bis Schritt 6 werden die Anlässe nur gesammelt. Den Planungsaufruf dazu ergänzt
         Schritt 6 (#27).
         """
         self.anlaesse.append(Anlass(art, self.env.now, detail))
@@ -200,9 +201,14 @@ class Simulation:
         """Prozess: legt je Produktauftrag die Anforderungen an und startet das Werkstück."""
         raise NotImplementedError("AP3 Schritt 8: Bedarfseingang")
 
-    def versorgung(self, charge, box):
-        """Prozess je Charge: Kommissionierung, dann Hintransport bis zur Lieferung."""
-        raise NotImplementedError("AP3 Schritte 2 und 3: Versorgungskette")
+    def versorgung(self, charge: Charge, box: Box):
+        """Prozess je Charge: Kommissionierung, dann Hintransport bis zur Lieferung.
+
+        Die Bindung startet ihn (Anschlusspunkt 1). ``yield from`` reicht die Wartepunkte der
+        beiden Teilprozesse durch; so bleiben sie einzeln testbar.
+        """
+        yield from self.kommissionierung(charge, box)
+        yield from self.hintransport(charge, box)
 
     def kommissionierung(self, charge: Charge, box: Box):
         """Belegt den Kommissionierplatz, pickt die Sätze der Charge und legt die Teile in die Box.
@@ -269,9 +275,67 @@ class Simulation:
         self.protokolliere(Ereignistyp.RESERVIERUNG_AUFGELOEST, ressource=KOMMISSIONIERPLATZ, **ids)
         self.melde_anlass(Planungsanlass.KAPAZITAET_FREI, KOMMISSIONIERPLATZ)
 
-    def hintransport(self, charge, box):
-        """Reserviert den Übergabeplatz, holt ein Fahrzeug, fährt und liefert ab."""
-        raise NotImplementedError("AP3 Schritt 3: Hintransport und Lieferung")
+    def hintransport(self, charge: Charge, box: Box):
+        """Reserviert einen Übergabeplatz der Zielstation, holt ein Fahrzeug, fährt und liefert ab.
+
+        Bauplan, Abschnitt 7, Schritte 6 bis 9. Übergangsregeln bis zum Referenzpaket (#18):
+        erst Übergabeplatz, dann Fahrzeug (A-12); Fahrzeuge und Plätze nach dem Regalprinzip,
+        das am längsten freie zuerst, wartende Aufträge in ihrer Reihenfolge (A-13).
+        """
+        if (
+            box.id != charge.box_id
+            or box.zustand != BoxZustand.IN_KOMMISSIONIERUNG
+            or len(box.plaetze) != charge.positionen
+        ):
+            raise SimulationsFehler(
+                f"Charge {charge.id}: Box {box.id} ist nicht fertig kommissioniert "
+                f"(Zustand {box.zustand}, {len(box.plaetze)} von {charge.positionen} Teilen)"
+            )
+        ids = {"charge_id": charge.id, "box_id": str(box.id)}
+
+        # 6  Übergabeplatz der Zielstation reservieren. Sind alle belegt, wartet die fertige Box
+        #    an der Kommissionierung und bindet kein Fahrzeug (A-12).
+        platz = yield self.uebergabeplaetze[charge.station].get()
+        self.protokolliere(Ereignistyp.RESERVIERT, ressource=platz, **ids)
+
+        # 7  Fahrzeug holen; Hintransporte und Leerboxen stellen sich gemeinsam an (A-13).
+        fahrzeug = yield self.fahrzeuge.get()
+        self.protokolliere(Ereignistyp.RESERVIERT, ressource=fahrzeug, **ids)
+
+        # 8  Aufnahme, Fahrt und Übergabe als ein Fahrauftrag (A-07: ohne Warten auf ein Fahrzeug).
+        box.zustand = BoxZustand.UNTERWEGS
+        self.protokolliere(
+            Ereignistyp.TRANSPORT_BEGINN,
+            ressource=fahrzeug,
+            zustand_alt=BoxZustand.IN_KOMMISSIONIERUNG,
+            zustand_neu=BoxZustand.UNTERWEGS,
+            menge=len(box.plaetze),  # belegte Positionen, für K3
+            **ids,
+        )
+        yield Termin(self.env, self.dauer("fahrzeuge.fahrauftrag_s"), LIEFERUNG, nr=box.id)
+        self.protokolliere(Ereignistyp.TRANSPORT_ENDE, ressource=fahrzeug, **ids)
+
+        # 9  Lieferung: Die Box steht auf dem Platz, die Montage findet sie über box_an_platz
+        #    (Anschlusspunkt 2). Der Platz bleibt belegt, bis die leere Box abgeholt ist.
+        if platz in self.box_an_platz:
+            raise SimulationsFehler(f"Charge {charge.id}: Übergabeplatz {platz} ist schon belegt")
+        self.chargen_in_versorgung -= 1
+        if self.chargen_in_versorgung < 0:
+            raise SimulationsFehler(f"Charge {charge.id}: mehr Lieferungen als gebundene Chargen")
+        box.zustand = BoxZustand.AN_STATION
+        self.box_an_platz[platz] = box
+        self.protokolliere(
+            Ereignistyp.LIEFERUNG,
+            ressource=platz,
+            zustand_alt=BoxZustand.UNTERWEGS,
+            zustand_neu=BoxZustand.AN_STATION,
+            **ids,
+        )
+
+        # Das Fahrzeug ist sofort wieder frei und stellt sich hinten ins Regal.
+        self.fahrzeuge.put(fahrzeug)
+        self.protokolliere(Ereignistyp.RESERVIERUNG_AUFGELOEST, ressource=fahrzeug, **ids)
+        self.melde_anlass(Planungsanlass.KAPAZITAET_FREI, fahrzeug)
 
     def leerboxrueckfuehrung(self, box, platz):
         """Prozess: holt die leere Box ab, gibt den Platz frei und bringt sie ins Lager."""

@@ -26,7 +26,11 @@ def auftragsfreigabe(zeit_s: float, wartende_auftraege: Sequence[Any]) -> Sequen
 
 
 def fahrzeugzuordnung(freie_fahrzeuge: Sequence[Any], transportauftrag: Any) -> Any:
-    """Ordnet einem Transportauftrag ein freies Fahrzeug zu (feste Regel)."""
+    """Ordnet einem Transportauftrag ein freies Fahrzeug zu (feste Regel).
+
+    Übergangsregel bis zum Referenzpaket: A-13, umgesetzt in ``Simulation.hintransport`` über
+    das Fahrzeugregal (am längsten freies Fahrzeug, wartende Aufträge in ihrer Reihenfolge).
+    """
     raise NotImplementedError("AP3: Fahrzeugzuordnung nach Referenzpaket")
 
 
@@ -40,6 +44,9 @@ def uebergabe_bei_vollem_zielpuffer(station: str, charge: Any) -> Any:
 
     MES-Beleg: OpNo 215 sucht einen freien Pufferplatz der Station (``PNo = 0``); eine
     Ausweichregel ist in den Daten nicht hinterlegt.
+
+    Übergangsregel bis zum Referenzpaket: A-12 (erst Übergabeplatz, dann Fahrzeug), umgesetzt in
+    ``Simulation.hintransport``.
     """
     raise NotImplementedError("AP3: Warte- und Übergaberegel nach Referenzpaket")
 
