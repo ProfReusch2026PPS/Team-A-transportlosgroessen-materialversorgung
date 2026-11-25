@@ -105,6 +105,37 @@ def zeitpunkte(sim, ereignis, **felder):
     return [zeile.zeit_s for zeile in zeilen(sim, ereignis, **felder)]
 
 
+WARTEN = (Ereignistyp.WARTEN_BEGINN, Ereignistyp.WARTEN_ENDE)
+
+
+def ohne_warten(sim):
+    """Protokollzeilen ohne Wartezeiten (die prüfen die Tests zu Schritt 5)."""
+    return [zeile for zeile in sim.protokoll.ereignisse if zeile.ereignis not in WARTEN]
+
+
+def wartezeiten(sim, anforderung_id):
+    """Wartezeit je Ursache eines Satzes, aus dem Protokoll gerechnet wie bei AP5.
+
+    Prüft dabei: Beginn und Ende passen zueinander, keine Wartezeit hat die Länge null, am Ende
+    ist keine mehr offen.
+    """
+    summe = {}
+    offen = None
+    for zeile in sim.protokoll.ereignisse:
+        if zeile.anforderung_id != anforderung_id or zeile.ereignis not in WARTEN:
+            continue
+        if zeile.ereignis == Ereignistyp.WARTEN_BEGINN:
+            assert offen is None, f"zwei Wartezeiten zugleich bei {zeile.zeit_s} s"
+            offen = zeile
+        else:
+            assert offen is not None and offen.ursache == zeile.ursache
+            assert zeile.zeit_s > offen.zeit_s, f"Wartezeit der Länge null bei {zeile.zeit_s} s"
+            summe[zeile.ursache] = summe.get(zeile.ursache, 0.0) + zeile.zeit_s - offen.zeit_s
+            offen = None
+    assert offen is None, f"Wartezeit {offen.ursache} endet nicht"
+    return summe
+
+
 # --- Schritt 2: Kommissionierung -----------------------------------------------------------------
 
 
@@ -190,7 +221,7 @@ def test_belegung_des_platzes_steht_im_protokoll(sim):
     sim.env.process(sim.kommissionierung(charge, box))
     sim.env.run()
 
-    assert [zeile.ereignis for zeile in sim.protokoll.ereignisse] == [
+    assert [zeile.ereignis for zeile in ohne_warten(sim)] == [
         Ereignistyp.RESERVIERT,
         Ereignistyp.KOMMISSIONIERUNG_BEGINN,
         Ereignistyp.TEIL_GEPICKT,
@@ -198,8 +229,8 @@ def test_belegung_des_platzes_steht_im_protokoll(sim):
         Ereignistyp.KOMMISSIONIERUNG_ENDE,
         Ereignistyp.RESERVIERUNG_AUFGELOEST,
     ]
-    assert all(zeile.charge_id == "C001" for zeile in sim.protokoll.ereignisse)
-    assert all(zeile.box_id == str(box.id) for zeile in sim.protokoll.ereignisse)
+    assert all(zeile.charge_id == "C001" for zeile in ohne_warten(sim))
+    assert all(zeile.box_id == str(box.id) for zeile in ohne_warten(sim))
     belegung = zeilen(sim, Ereignistyp.RESERVIERT) + zeilen(
         sim, Ereignistyp.RESERVIERUNG_AUFGELOEST
     )
@@ -314,7 +345,7 @@ def test_hintransport_steht_vollstaendig_im_protokoll(sim):
     sim.env.run()
 
     # Die ersten sechs Zeilen gehören zur Kommissionierung (Schritt 2).
-    assert [(z.zeit_s, z.ereignis, z.ressource) for z in sim.protokoll.ereignisse[6:]] == [
+    assert [(z.zeit_s, z.ereignis, z.ressource) for z in ohne_warten(sim)[6:]] == [
         (372.0, Ereignistyp.RESERVIERT, "RASS1.platz_1"),
         (372.0, Ereignistyp.RESERVIERT, "fahrzeug_1"),
         (372.0, Ereignistyp.TRANSPORT_BEGINN, "fahrzeug_1"),
@@ -330,8 +361,8 @@ def test_hintransport_steht_vollstaendig_im_protokoll(sim):
     )
     lieferung = zeilen(sim, Ereignistyp.LIEFERUNG)[0]
     assert (lieferung.zustand_alt, lieferung.zustand_neu) == ("unterwegs", "an_station")
-    assert all(z.charge_id == "C001" for z in sim.protokoll.ereignisse)
-    assert all(z.box_id == str(box.id) for z in sim.protokoll.ereignisse)
+    assert all(z.charge_id == "C001" for z in ohne_warten(sim))
+    assert all(z.box_id == str(box.id) for z in ohne_warten(sim))
 
 
 def test_freies_fahrzeug_wird_als_anlass_gemeldet(sim):
@@ -560,3 +591,130 @@ def test_volle_box_wird_nicht_zurueckgefuehrt(sim):
     sim.env.process(rueckfuehrung_ohne_montage())
     with pytest.raises(SimulationsFehler, match="nicht leer"):
         sim.env.run()
+
+
+# --- Schritt 5: Warteursachen der Versorgungskette -----------------------------------------------
+# Kontrollrechnung (Bauplan, Abschnitt 10): Zeit bis zur Lieferung
+#   = Summe der Wartezeiten + eigene Picks (23 s je Teil) + Fahrauftrag (96 s).
+
+
+def test_wartezeiten_eines_rass1_satzes(sim):
+    charge, box = binde_von_hand(sim, "RASS1", [1])
+
+    sim.env.process(sim.versorgung(charge, box))
+    sim.env.run()
+
+    # Warten bis zum ersten eigenen Pick (Vorlauf), dann wieder nach dem letzten (Quellboxwechsel)
+    assert [(z.zeit_s, z.ursache) for z in zeilen(sim, Ereignistyp.WARTEN_BEGINN)] == [
+        (0.0, "kommissionierung"),
+        (310.0, "kommissionierung"),
+    ]
+    assert zeitpunkte(sim, Ereignistyp.WARTEN_ENDE) == [264.0, 372.0]
+    assert wartezeiten(sim, "A001-RASS1") == {"kommissionierung": 326.0}
+    assert 326 + 2 * 23 + 96 == zeitpunkte(sim, Ereignistyp.LIEFERUNG)[0] == 468
+    assert sim.warteursache == {}
+
+
+def test_rass3_satz_wartet_nur_auf_den_vorlauf(sim):
+    charge, box = binde_von_hand(sim, "RASS3", [1])
+
+    sim.env.process(sim.versorgung(charge, box))
+    sim.env.run()
+
+    # Nach dem einzigen Pick ist die Kommissionierung zu Ende: kein zweites Warten.
+    assert wartezeiten(sim, "A001-RASS3") == {"kommissionierung": 264.0}
+    assert 264 + 23 + 96 == zeitpunkte(sim, Ereignistyp.LIEFERUNG)[0] == 383
+
+
+def test_fremde_picks_zaehlen_als_warten_auf_die_kommissionierung(sim):
+    charge, box = binde_von_hand(sim, "RASS1", [1, 2, 3])
+
+    sim.env.process(sim.versorgung(charge, box))
+    sim.env.run()
+
+    # Jeder Satz wartet auf den Vorlauf, die Picks der anderen und den Wechsel: 464 − 46 s.
+    for auftrag in (1, 2, 3):
+        assert wartezeiten(sim, f"A00{auftrag}-RASS1") == {"kommissionierung": 418.0}
+    assert 418 + 2 * 23 + 96 == zeitpunkte(sim, Ereignistyp.LIEFERUNG)[0] == 560
+
+
+def test_zweite_charge_wartet_auf_den_belegten_platz(sim):
+    erste, erste_box = binde_von_hand(sim, "RASS1", [1], nr=1)
+    zweite, zweite_box = binde_von_hand(sim, "RASS1", [2], nr=2)
+
+    sim.env.process(sim.versorgung(erste, erste_box))
+    sim.env.process(sim.versorgung(zweite, zweite_box))
+    sim.env.run()
+
+    # 372 s auf den Kommissionierplatz, dann 264 s Vorlauf und 62 s Wechsel
+    assert wartezeiten(sim, "A002-RASS1") == {"kommissionierung": 698.0}
+    assert 698 + 2 * 23 + 96 == zeitpunkte(sim, Ereignistyp.LIEFERUNG, charge_id="C002")[0]
+
+
+def test_spaeterer_versand_zaehlt_als_buendelung(sim):
+    charge, box = binde_von_hand(sim, "RASS1", [1], versand_s=100.0)
+
+    sim.env.process(sim.versorgung(charge, box))
+    sim.env.run()
+
+    assert wartezeiten(sim, "A001-RASS1") == {"buendelung": 100.0, "kommissionierung": 326.0}
+    assert 100 + 326 + 2 * 23 + 96 == zeitpunkte(sim, Ereignistyp.LIEFERUNG)[0] == 568
+
+
+def test_volle_station_ergibt_wartezeit_stationskapazitaet(anlage, szenarien):
+    sim = mit_abweichungen(anlage, szenarien, stationen__RASS1__uebergabeplaetze=1)
+    besetzt = sim.uebergabeplaetze["RASS1"].items.pop(0)
+    charge, box = binde_von_hand(sim, "RASS1", [1])
+
+    def platz_wird_frei():
+        yield sim.env.timeout(600)
+        yield sim.uebergabeplaetze["RASS1"].put(besetzt)
+
+    sim.env.process(platz_wird_frei())
+    sim.env.process(sim.versorgung(charge, box))
+    sim.env.run()
+
+    assert wartezeiten(sim, "A001-RASS1") == {
+        "kommissionierung": 326.0,
+        "stationskapazitaet": 228.0,
+    }
+    assert 326 + 228 + 2 * 23 + 96 == zeitpunkte(sim, Ereignistyp.LIEFERUNG)[0] == 696
+
+
+def test_fehlendes_fahrzeug_ergibt_wartezeit_transport(anlage, szenarien):
+    sim = mit_abweichungen(anlage, szenarien, fahrzeuge__anzahl=1)
+    fahrzeug_belegt_bis(sim, 500)
+    charge, box = binde_von_hand(sim, "RASS1", [1])
+
+    sim.env.process(sim.versorgung(charge, box))
+    sim.env.run()
+
+    assert wartezeiten(sim, "A001-RASS1") == {"kommissionierung": 326.0, "transport": 128.0}
+    assert 326 + 128 + 2 * 23 + 96 == zeitpunkte(sim, Ereignistyp.LIEFERUNG)[0] == 596
+    # Die Ursache wechselt ohne Lücke: Ende und Beginn zur selben Zeit
+    warten = [(z.zeit_s, z.ereignis, z.ursache) for z in sim.protokoll.ereignisse if z.ursache]
+    assert warten[-3:] == [
+        (372.0, Ereignistyp.WARTEN_ENDE, "kommissionierung"),
+        (372.0, Ereignistyp.WARTEN_BEGINN, "transport"),
+        (500.0, Ereignistyp.WARTEN_ENDE, "transport"),
+    ]
+
+
+def test_wartezeit_der_laenge_null_kommt_nicht_ins_protokoll(anlage, szenarien):
+    sim = mit_abweichungen(anlage, szenarien, stationen__RASS1__uebergabeplaetze=1)
+    besetzt = sim.uebergabeplaetze["RASS1"].items.pop(0)
+    charge, box = binde_von_hand(sim, "RASS1", [1])
+
+    def platz_wird_im_selben_moment_frei():
+        # bei 372 s, aber erst nach der Freigabe des Kommissionierplatzes (Rang LIEFERUNG)
+        yield Termin(sim.env, 372, LIEFERUNG)
+        yield sim.uebergabeplaetze["RASS1"].put(besetzt)
+
+    sim.env.process(platz_wird_im_selben_moment_frei())
+    sim.env.process(sim.versorgung(charge, box))
+    sim.env.run()
+
+    # Die Box hat kurz auf den Platz gewartet, aber 0 s lang: Das zählt nicht.
+    assert zeilen(sim, Ereignistyp.WARTEN_BEGINN, ursache="stationskapazitaet") == []
+    assert wartezeiten(sim, "A001-RASS1") == {"kommissionierung": 326.0}
+    assert zeitpunkte(sim, Ereignistyp.LIEFERUNG) == [468.0]

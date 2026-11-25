@@ -11,8 +11,8 @@ Dieser Bauplan beschreibt, wie der Simulationskern in `src/matsim/modell/simulat
 | 1 | Grundgerüst | #38 | erledigt (`fb2401b`) |
 | 2 | Kommissionierung | #38 | erledigt (`9a6d636`) |
 | 3 | Hintransport und Lieferung | #38 | erledigt (`e78f292`) |
-| 4 | Leerboxrückführung | #38 | erledigt |
-| 5 | Warteursachen der Versorgungskette | #38 | offen |
+| 4 | Leerboxrückführung | #38 | erledigt (`bc69863`) |
+| 5 | Warteursachen der Versorgungskette | #38 | erledigt |
 | 6 | Planungsaufruf und Bindung | #27 | offen |
 | 7 | Werkstückumlauf und Montage | #28 | offen |
 | 8 | Durchstich (M2) | folgt | offen |
@@ -43,7 +43,7 @@ Der Simulationskern ist die Klasse `Simulation` in `src/matsim/modell/simulation
 | Teil | Zuständig | Issue | Stand |
 | --- | --- | --- | --- |
 | Grundgerüst: Zustand, Ressourcen, Zeiten | Laurens | #38 | erledigt |
-| Versorgungskette: Kommissionierung bis Leerboxrückführung | Laurens | #38 | in Arbeit |
+| Versorgungskette: Kommissionierung bis Leerboxrückführung | Laurens | #38 | erledigt |
 | Planungsaufruf, Chargenbindung, Wartefristen, Ereignisreihenfolge | Laurens (Übernahme mit Mehmet abzustimmen) | #27 | offen |
 | Werkstückumlauf und Montage | Laurens (Übernahme mit Mehmet abzustimmen) | #28 | offen |
 | Review der AP3-PRs | Mehmet | – | – |
@@ -360,12 +360,12 @@ Jedes Produkt ist ein Werkstück, das RASS1, RASS2 und RASS3 der Reihe nach anf�
 
 ## 9 Gleichzeitige Ereignisse
 
-Bei gleicher Zeit gilt: Ressourcenfreigaben, dann Lieferungen, dann Werkstückankünfte, dann Bedarfseingänge und Fristen, zuletzt der Planungsaufruf. Umgesetzt wird das über die Priorität, mit der ein Ereignis in SimPys Warteschlange kommt. Der Prototyp hat bestätigt, dass das funktioniert.
+Bei gleicher Zeit gilt: Ressourcenfreigaben, dann Lieferungen, dann Werkstückankünfte, dann Bedarfseingänge und Fristen, zuletzt der Planungsaufruf. Danach schreibt die Simulation nur noch die Warteursachen ins Protokoll (Abgleich, Abschnitt 10). Umgesetzt wird das über die Priorität, mit der ein Ereignis in SimPys Warteschlange kommt. Der Prototyp hat bestätigt, dass das funktioniert.
 
 **So ordnet SimPy:** Jedes Ereignis liegt in einer Warteschlange, sortiert nach Zeit, dann Priorität, dann Einfügereihenfolge. SimPy selbst nutzt nur die Prioritäten 0 und 1. `env.schedule(ereignis, prioritaet, verzoegerung)` nimmt aber jede Zahl. Eine kleine Hilfsklasse macht daraus einen Timeout mit Rang:
 
 ```python
-FREIGABE, LIEFERUNG, ANKUNFT, BEDARF, FRIST, PLANUNG = 2, 3, 4, 5, 6, 9
+FREIGABE, LIEFERUNG, ANKUNFT, BEDARF, FRIST, PLANUNG, ABGLEICH = 2, 3, 4, 5, 6, 9, 10
 
 class Termin(Event):  # gekürzt, ohne die Prüfung der Eingaben
     """Wie env.timeout(), aber mit Rang für gleichzeitige Ereignisse."""
@@ -385,7 +385,8 @@ class Termin(Event):  # gekürzt, ohne die Prüfung der Eingaben
 | 4 | Werkstückankunft | 4 | Ankunft an einer Station, auch nach einem Umlauf |
 | 5 | Bedarfseingang | 5 | Produktauftrag kommt an |
 | 6 | Wartefrist | 6 | Frist des Verfahrens läuft ab |
-| 7 | Planungsaufruf | 9 | immer zuletzt |
+| 7 | Planungsaufruf | 9 | nach allen fachlichen Ereignissen |
+| 8 | Abgleich der Warteursachen | 10 | kein fachliches Ereignis, schreibt nur Wartezeiten ins Protokoll (Abschnitt 10) |
 
 **Gleicher Rang:** Die kleinere Identität zuerst. Dafür kommt die laufende Nummer des Objekts als winziger Zuschlag dazu (`nr × 10⁻⁶`), etwa Werkstück 1 vor Werkstück 2.
 
@@ -440,7 +441,9 @@ Jede Zustandsänderung wird eine Zeile. Jede Belegung einer begrenzten Ressource
 
 **Vor der Bindung** bewertet `plane()` am Ende jedes Aufrufs jeden offenen Satz neu. Ändert sich die Ursache, folgen `warten_ende` (alt) und `warten_beginn` (neu) zur selben Zeit. Das reicht, weil jede Änderung an Bestand oder freien Boxen einen Planungsaufruf auslöst.
 
-**Nach der Bindung** beginnt die Wartezeit „Kommissionierung“ sofort, auch der Vorlauf zählt dazu. Sie endet vor dem ersten eigenen Pick und beginnt nach dem letzten eigenen Pick neu, wenn bis zum Ende der Kommissionierung noch Zeit vergeht. „Stationskapazität“ und „Transport“ schreibt die Versorgung nur, wenn die Anfrage nicht sofort bedient wird (wie `warte_auf` im Lernnotebook). Wartezeiten der Länge null kommen nicht ins Protokoll.
+**Nach der Bindung** beginnt die Wartezeit „Kommissionierung“ sofort, auch der Vorlauf zählt dazu. Sie endet vor dem ersten eigenen Pick und beginnt nach dem letzten eigenen Pick neu, wenn bis zum Ende der Kommissionierung noch Zeit vergeht. Danach folgen, falls nötig, „Stationskapazität“ (kein Übergabeplatz frei) und „Transport“ (Platz reserviert, kein Fahrzeug frei). Wartezeiten der Länge null kommen nicht ins Protokoll.
+
+**Umsetzung (Schritt 5):** Die Prozesse setzen nur die aktuelle Ursache: `setze_warteursache(anforderung_ids, ursache)`, `None` heißt „wartet nicht“. Ins Protokoll schreibt sie erst ein Abgleich am Ende des Zeitpunkts, mit dem Rang `ABGLEICH` nach der Planung. Er vergleicht je geändertem Satz die aktuelle Ursache mit der laut Protokoll und schreibt bei einem Unterschied `warten_ende` (alt) und `warten_beginn` (neu). So entsteht keine Wartezeit der Länge null, auch wenn ein Platz im selben Moment frei wird, und mehrere Wechsel im selben Moment ergeben höchstens ein Ende und einen Beginn. Die Planung (Schritt 6) nutzt denselben Weg für Bestand, Box und Bündelung.
 
 **Kontrollrechnung (AP5 prüft sie):** Zeit bis zur Bereitstellung = Summe der Wartezeiten + eigene Pickzeit + Fahrzeit. Für einen RASS1-Satz allein: 468 s = (264 + 62) s Kommissionierung + 46 s eigene Picks + 96 s Fahrt.
 

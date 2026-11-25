@@ -1,9 +1,10 @@
 """SimPy-Modell der Materialversorgung (AP3).
 
-Stand: Bauplan, Schritt 4. Fertig sind das Grundgerüst (Ressourcen, Zustand, Zeiten,
-Reihenfolge gleichzeitiger Ereignisse, Protokollhilfe) und der Weg der Box: Kommissionierung,
-Hintransport bis zur Lieferung und Leerboxrückführung. Die übrigen Prozesse folgen in den
-Schritten 5 bis 8 und lösen bis dahin ``NotImplementedError`` aus.
+Stand: Bauplan, Schritt 5. Fertig sind das Grundgerüst (Ressourcen, Zustand, Zeiten,
+Reihenfolge gleichzeitiger Ereignisse, Protokollhilfe) und die Versorgungskette: Kommissionierung,
+Hintransport bis zur Lieferung, Leerboxrückführung und die Warteursachen der Sätze auf diesem Weg.
+Die übrigen Prozesse folgen in den Schritten 6 bis 8 und lösen bis dahin ``NotImplementedError``
+aus.
 
 Die Simulation verarbeitet die Entscheidungen eines Planungsverfahrens mit begrenzten
 Ressourcen. Sie übernimmt keine geplanten Fertigstellungen als Ergebnis und ruft das
@@ -20,7 +21,12 @@ import simpy
 from simpy.events import Event
 
 from matsim.daten.zeiten import Zeitverteilung, lade_verteilungen
-from matsim.kennzahlen.ereignisprotokoll import Ereignis, Ereignisprotokoll, Ereignistyp
+from matsim.kennzahlen.ereignisprotokoll import (
+    Ereignis,
+    Ereignisprotokoll,
+    Ereignistyp,
+    Warteursache,
+)
 from matsim.modell.anlage import AnlagenFehler, mit_abweichungen, wert
 from matsim.modell.typen import Box, Boxplatz, BoxZustand, Charge, Produktauftrag
 from matsim.regeln.basis import Anlass, Planungsanlass, Planungsverfahren, Planungszustand
@@ -34,7 +40,8 @@ LIEFERUNG = 3  # eine Box kommt am Übergabeplatz an
 ANKUNFT = 4  # ein Werkstück kommt an einer Station an
 BEDARF = 5  # ein Produktauftrag kommt an
 FRIST = 6  # eine Wartefrist des Verfahrens läuft ab
-PLANUNG = 9  # der Planungsaufruf, immer zuletzt
+PLANUNG = 9  # der Planungsaufruf, nach allen fachlichen Ereignissen
+ABGLEICH = 10  # Warteursachen ins Protokoll, nach allem anderen (Bauplan, Abschnitt 10)
 
 #: Name des Kommissionierplatzes im Protokoll (es gibt nur einen).
 KOMMISSIONIERPLATZ = "kommissionierplatz"
@@ -146,7 +153,10 @@ class Simulation:
         self.chargen: dict = {}  # gebundene Chargen, unveränderlich
         self.box_an_platz: dict[str, Box] = {}  # welche Box auf welchem Übergabeplatz steht
         self.chargen_in_versorgung = 0  # gebunden, aber noch nicht abgeliefert (für V0)
-        self.warteursache: dict = {}  # laufende Wartezeit je Satz (Schritt 5 und 6)
+        #: Worauf ein Satz gerade wartet, je Anforderung; fehlt sie, wartet der Satz nicht.
+        self.warteursache: dict[str, Warteursache] = {}
+        self._warten_im_protokoll: dict[str, Warteursache] = {}  # Stand laut Protokoll
+        self._abzugleichen: dict[str, None] = {}  # in diesem Zeitpunkt geändert, in Reihenfolge
         #: Gemeldete Planungsanlässe; ab Schritt 6 löst der erste je Zeitpunkt die Planung aus.
         self.anlaesse: list[Anlass] = []
         self.werkstuecke: dict = {}  # Werkstücke mit Fortschritt (Schritt 7)
@@ -178,6 +188,44 @@ class Simulation:
     def protokolliere(self, ereignis: Ereignistyp, **felder: Any) -> Ereignis:
         """Schreibt eine Zeile mit der aktuellen Simulationszeit ins Ereignisprotokoll."""
         return self.protokoll.schreibe(self.env.now, ereignis, **felder)
+
+    def setze_warteursache(
+        self, anforderung_ids: Iterable[str], ursache: Warteursache | None
+    ) -> None:
+        """Legt fest, worauf die Sätze ab jetzt warten; ``None`` heißt, sie warten nicht.
+
+        Ins Protokoll kommt nur, was am Ende des Zeitpunkts gilt: Der Abgleich läuft nach allen
+        anderen Ereignissen derselben Zeit (Rang ABGLEICH). So entstehen keine Wartezeiten der
+        Länge null, und mehrere Wechsel im selben Moment ergeben höchstens ein Ende und einen
+        Beginn (Bauplan, Abschnitt 10).
+        """
+        if not self._abzugleichen:
+            Termin(self.env, 0, ABGLEICH).callbacks.append(self._gleiche_wartezeiten_ab)
+        for anforderung_id in anforderung_ids:
+            if ursache is None:
+                self.warteursache.pop(anforderung_id, None)
+            else:
+                self.warteursache[anforderung_id] = ursache
+            self._abzugleichen[anforderung_id] = None
+
+    def _gleiche_wartezeiten_ab(self, _ereignis: Event) -> None:
+        """Schreibt die Änderungen der Warteursachen dieses Zeitpunkts ins Protokoll."""
+        for anforderung_id in self._abzugleichen:
+            jetzt = self.warteursache.get(anforderung_id)
+            bisher = self._warten_im_protokoll.get(anforderung_id)
+            if jetzt == bisher:
+                continue
+            if bisher is not None:
+                self.protokolliere(
+                    Ereignistyp.WARTEN_ENDE, anforderung_id=anforderung_id, ursache=bisher
+                )
+                del self._warten_im_protokoll[anforderung_id]
+            if jetzt is not None:
+                self.protokolliere(
+                    Ereignistyp.WARTEN_BEGINN, anforderung_id=anforderung_id, ursache=jetzt
+                )
+                self._warten_im_protokoll[anforderung_id] = jetzt
+        self._abzugleichen.clear()
 
     # --- Planung (Bauplan, Abschnitt 6; Issue #27) ---------------------------------------------
 
@@ -218,27 +266,30 @@ class Simulation:
         Bauplan, Abschnitt 7, Schritte 0 bis 5. Die Charge ist schon gebunden: Box reserviert,
         Bestand vom freien Bestand abgezogen (Planung, Schritt 6). Dauer am Platz:
         Vorlauf + Teile × Pickzeit + (min(Quellboxen, Teile) − 1) × Quellboxwechsel (A-11).
+        Jeder Satz wartet auf die Kommissionierung, außer während seiner eigenen Picks
+        (Abschnitt 10).
         """
-        teile = [
-            (satz.anforderung_id, pno)
-            for satz in charge.saetze
-            for pno, menge in satz.komponenten
-            for _ in range(menge)
-        ]
+        saetze = [satz.anforderung_id for satz in charge.saetze]
         if box.id != charge.box_id or box.zustand != BoxZustand.IN_KOMMISSIONIERUNG or box.plaetze:
             raise SimulationsFehler(
                 f"Charge {charge.id}: Box {box.id} ist nicht die leere, reservierte Box "
                 f"{charge.box_id} (Zustand {box.zustand}, {len(box.plaetze)} Teile)"
             )
-        if len(teile) > box.positionen:
+        if charge.positionen > box.positionen:
             raise SimulationsFehler(
-                f"Charge {charge.id}: {len(teile)} Teile passen nicht in die Box"
+                f"Charge {charge.id}: {charge.positionen} Teile passen nicht in die Box"
             )
         ids = {"charge_id": charge.id, "box_id": str(box.id)}
 
         # 0  Will das Verfahren erst später versenden, beginnt die Kommissionierung erst dann.
+        #    Bis dahin warten die Sätze auf die Bündelung.
         if charge.versand_fruehestens_s > self.env.now:
+            self.setze_warteursache(saetze, Warteursache.BUENDELUNG)
             yield self.env.timeout(charge.versand_fruehestens_s - self.env.now)
+
+        # Ab jetzt wartet jeder Satz auf die Kommissionierung: auf den Platz, den Vorlauf und die
+        # Picks der Sätze vor ihm.
+        self.setze_warteursache(saetze, Warteursache.KOMMISSIONIERUNG)
 
         # 1  Kommissionierplatz anfordern; ist er belegt, stellt sich die Charge an.
         with self.kommissionierplatz.request() as anfrage:
@@ -252,22 +303,26 @@ class Simulation:
             yield self.env.timeout(self.dauer("kommissionierplatz.vorlauf_s"))
 
             # 3  Picks, Satz für Satz in der Reihenfolge der Charge; jedes Teil bleibt seiner
-            #    Anforderung zugeordnet.
-            for anforderung_id, pno in teile:
-                yield self.env.timeout(self.dauer("kommissionierplatz.pickzeit_je_teil_s"))
-                box.plaetze.append(Boxplatz(len(box.plaetze) + 1, pno, anforderung_id))
-                self.protokolliere(
-                    Ereignistyp.TEIL_GEPICKT,
-                    anforderung_id=anforderung_id,
-                    ressource=KOMMISSIONIERPLATZ,
-                    pno=pno,
-                    menge=1,
-                    **ids,
-                )
+            #    Anforderung zugeordnet. Während seiner eigenen Picks wartet ein Satz nicht.
+            for satz in charge.saetze:
+                self.setze_warteursache([satz.anforderung_id], None)
+                for pno, menge in satz.komponenten:
+                    for _ in range(menge):
+                        yield self.env.timeout(self.dauer("kommissionierplatz.pickzeit_je_teil_s"))
+                        box.plaetze.append(Boxplatz(len(box.plaetze) + 1, pno, satz.anforderung_id))
+                        self.protokolliere(
+                            Ereignistyp.TEIL_GEPICKT,
+                            anforderung_id=satz.anforderung_id,
+                            ressource=KOMMISSIONIERPLATZ,
+                            pno=pno,
+                            menge=1,
+                            **ids,
+                        )
+                self.setze_warteursache([satz.anforderung_id], Warteursache.KOMMISSIONIERUNG)
 
             # 4  Quellboxwechsel; eine Charge mit nur einem Teil braucht keinen.
             quellboxen = wert(self.anlage, "kommissionierplatz.quellboxen_je_auftrag")
-            for _ in range(min(quellboxen, len(teile)) - 1):
+            for _ in range(min(quellboxen, charge.positionen) - 1):
                 yield self.env.timeout(self.dauer("kommissionierplatz.quellboxwechsel_s"))
 
             # 5  Freigabe des Platzes im Rang FREIGABE, damit gleichzeitige Lieferungen,
@@ -276,6 +331,9 @@ class Simulation:
         self.protokolliere(Ereignistyp.KOMMISSIONIERUNG_ENDE, ressource=KOMMISSIONIERPLATZ, **ids)
         self.protokolliere(Ereignistyp.RESERVIERUNG_AUFGELOEST, ressource=KOMMISSIONIERPLATZ, **ids)
         self.melde_anlass(Planungsanlass.KAPAZITAET_FREI, KOMMISSIONIERPLATZ)
+        # Das Warten auf die Kommissionierung ist vorbei; worauf die Box jetzt wartet, legt der
+        # Hintransport fest.
+        self.setze_warteursache(saetze, None)
 
     def hintransport(self, charge: Charge, box: Box):
         """Reserviert einen Übergabeplatz der Zielstation, holt ein Fahrzeug, fährt und liefert ab.
@@ -294,15 +352,21 @@ class Simulation:
                 f"(Zustand {box.zustand}, {len(box.plaetze)} von {charge.positionen} Teilen)"
             )
         ids = {"charge_id": charge.id, "box_id": str(box.id)}
+        saetze = [satz.anforderung_id for satz in charge.saetze]
 
         # 6  Übergabeplatz der Zielstation reservieren. Sind alle belegt, wartet die fertige Box
-        #    an der Kommissionierung und bindet kein Fahrzeug (A-12).
+        #    an der Kommissionierung und bindet kein Fahrzeug (A-12). Warteursache:
+        #    Stationskapazität; wird der Platz sofort frei, kommt sie nicht ins Protokoll.
+        self.setze_warteursache(saetze, Warteursache.STATIONSKAPAZITAET)
         platz = yield self.uebergabeplaetze[charge.station].get()
         self.protokolliere(Ereignistyp.RESERVIERT, ressource=platz, **ids)
 
         # 7  Fahrzeug holen; Hintransporte und Leerboxen stellen sich gemeinsam an (A-13).
+        #    Warteursache: Transport. Ab dem Fahrzeug wartet der Satz nicht mehr, er fährt.
+        self.setze_warteursache(saetze, Warteursache.TRANSPORT)
         fahrzeug = yield self.fahrzeuge.get()
         self.protokolliere(Ereignistyp.RESERVIERT, ressource=fahrzeug, **ids)
+        self.setze_warteursache(saetze, None)
 
         # 8  Aufnahme, Fahrt und Übergabe als ein Fahrauftrag (A-07: ohne Warten auf ein Fahrzeug).
         box.zustand = BoxZustand.UNTERWEGS
