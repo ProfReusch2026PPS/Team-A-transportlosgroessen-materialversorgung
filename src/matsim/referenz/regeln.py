@@ -35,7 +35,11 @@ def fahrzeugzuordnung(freie_fahrzeuge: Sequence[Any], transportauftrag: Any) -> 
 
 
 def leerboxrueckfuehrung(station: str, box: Any) -> Any:
-    """Legt fest, wann und wohin eine geleerte Box zurückgeführt wird (feste Regel)."""
+    """Legt fest, wann und wohin eine geleerte Box zurückgeführt wird (feste Regel).
+
+    Übergangsregel bis zum Referenzpaket: A-14 (sofort, sobald ein Fahrzeug frei ist, ins
+    Kistenlager), umgesetzt in ``Simulation.leerboxrueckfuehrung``.
+    """
     raise NotImplementedError("AP3: Leerboxrückführung nach Referenzpaket")
 
 

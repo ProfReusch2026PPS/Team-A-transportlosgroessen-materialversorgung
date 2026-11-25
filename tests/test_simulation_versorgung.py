@@ -2,7 +2,9 @@
 
 Die Planung (Schritt 6) gibt es noch nicht. Die Tests binden Chargen deshalb von Hand, so wie es
 die Planung später tut: Box aus dem Regal nehmen und reservieren, Bestand abziehen, Charge bilden.
-Erwartete Zeiten mit Festwerten: Vorlauf 264 s, Pick 23 s je Teil, Quellboxwechsel 62 s.
+Erwartete Zeiten mit Festwerten: Vorlauf 264 s, Pick 23 s je Teil, Quellboxwechsel 62 s,
+Fahrauftrag 96 s, Rückfahrt der leeren Box 96 s. Die Montage (Schritt 7) ersetzt
+``montage_leert_box_bei``.
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ from matsim.kennzahlen.ereignisprotokoll import Ereignistyp
 from matsim.kennzahlen.pruefung import satz_vollstaendig_in_box
 from matsim.modell.anlage import lade_anlage
 from matsim.modell.simulation import (
+    BOX,
     KOMMISSIONIERPLATZ,
     LIEFERUNG,
     Simulation,
@@ -65,15 +68,28 @@ def mit_abweichungen(anlage, szenarien, **abweichungen):
     return Simulation(anlage, szenario, erzeuge("V1"), seed=1)
 
 
-def fahrzeug_belegt_bis(sim, ende_s):
-    """Ein fremder Auftrag hält das vorderste Fahrzeug bis ende_s fest."""
+def fahrzeug_belegt_bis(sim, ende_s, ab_s=0.0):
+    """Ein fremder Auftrag hält ab ab_s das vorderste freie Fahrzeug bis ende_s fest."""
 
     def fremder_auftrag():
+        yield sim.env.timeout(ab_s)
         fahrzeug = yield sim.fahrzeuge.get()
-        yield sim.env.timeout(ende_s)
+        yield sim.env.timeout(ende_s - sim.env.now)
         yield sim.fahrzeuge.put(fahrzeug)
 
     sim.env.process(fremder_auftrag())
+
+
+def montage_leert_box_bei(sim, box, zeit_s):
+    """Ersatz für die Montage (Schritt 7): nimmt alle Teile heraus und startet die Rückführung."""
+
+    def montage():
+        yield sim.env.timeout(zeit_s)
+        platz = next(p for p, b in sim.box_an_platz.items() if b is box)
+        box.plaetze.clear()
+        sim.env.process(sim.leerboxrueckfuehrung(box, platz))
+
+    sim.env.process(montage())
 
 
 def zeilen(sim, ereignis, **felder):
@@ -431,4 +447,116 @@ def test_unvollstaendige_box_wird_nicht_transportiert(sim):
 
     sim.env.process(sim.hintransport(charge, box))
     with pytest.raises(SimulationsFehler, match="nicht fertig kommissioniert"):
+        sim.env.run()
+
+
+# --- Schritt 4: Leerboxrückführung ---------------------------------------------------------------
+
+
+def test_leere_box_ist_96_s_nach_der_abholung_wieder_frei(sim):
+    charge, box = binde_von_hand(sim, "RASS1", [1])
+    montage_leert_box_bei(sim, box, 600)
+
+    sim.env.process(sim.versorgung(charge, box))
+    sim.env.run()
+
+    # Geliefert bei 468 s, geleert bei 600 s, sofort abgeholt, 96 s Rückfahrt
+    assert zeitpunkte(sim, Ereignistyp.LEERBOX_RUECK_BEGINN) == [600.0]
+    assert zeitpunkte(sim, Ereignistyp.LEERBOX_RUECK_ENDE) == [696.0]
+    assert box.zustand == BoxZustand.FREI
+    assert sim.box_an_platz == {}
+    # Alles wieder frei; was zuletzt frei wurde, steht hinten im Regal.
+    assert sim.uebergabeplaetze["RASS1"].items == ["RASS1.platz_2", "RASS1.platz_1"]
+    assert sim.boxen.items[-1] is box
+    assert len(sim.boxen.items) == 7
+    assert sim.fahrzeuge.items == ["fahrzeug_1", "fahrzeug_2"]
+
+
+def test_rueckfuehrung_steht_vollstaendig_im_protokoll(sim):
+    charge, box = binde_von_hand(sim, "RASS1", [1])
+    montage_leert_box_bei(sim, box, 600)
+
+    sim.env.process(sim.versorgung(charge, box))
+    sim.env.run()
+
+    # fahrzeug_1 hat die Box gebracht; am längsten frei ist jetzt fahrzeug_2 (A-13).
+    rueckfuehrung = [z for z in sim.protokoll.ereignisse if z.zeit_s >= 600]
+    assert [(z.zeit_s, z.ereignis, z.ressource) for z in rueckfuehrung] == [
+        (600.0, Ereignistyp.RESERVIERT, "fahrzeug_2"),
+        (600.0, Ereignistyp.LEERBOX_RUECK_BEGINN, "fahrzeug_2"),
+        (600.0, Ereignistyp.RESERVIERUNG_AUFGELOEST, "RASS1.platz_1"),
+        (696.0, Ereignistyp.LEERBOX_RUECK_ENDE, "fahrzeug_2"),
+        (696.0, Ereignistyp.RESERVIERUNG_AUFGELOEST, BOX),
+        (696.0, Ereignistyp.RESERVIERUNG_AUFGELOEST, "fahrzeug_2"),
+    ]
+    assert all(z.box_id == str(box.id) for z in rueckfuehrung)
+    beginn = zeilen(sim, Ereignistyp.LEERBOX_RUECK_BEGINN)[0]
+    ende = zeilen(sim, Ereignistyp.LEERBOX_RUECK_ENDE)[0]
+    assert (beginn.zustand_alt, beginn.zustand_neu) == ("an_station", "leer_zurueck")
+    assert (ende.zustand_alt, ende.zustand_neu) == ("leer_zurueck", "frei")
+
+
+def test_platz_box_und_fahrzeug_werden_als_anlass_gemeldet(sim):
+    charge, box = binde_von_hand(sim, "RASS1", [1])
+    montage_leert_box_bei(sim, box, 600)
+
+    sim.env.process(sim.versorgung(charge, box))
+    sim.env.run()
+
+    assert [a for a in sim.anlaesse if a.zeit_s >= 600] == [
+        Anlass(Planungsanlass.KAPAZITAET_FREI, 600.0, "RASS1.platz_1"),
+        Anlass(Planungsanlass.KAPAZITAET_FREI, 696.0, BOX),
+        Anlass(Planungsanlass.KAPAZITAET_FREI, 696.0, "fahrzeug_2"),
+    ]
+
+
+def test_leere_box_bleibt_auf_dem_platz_bis_ein_fahrzeug_kommt(anlage, szenarien):
+    sim = mit_abweichungen(anlage, szenarien, fahrzeuge__anzahl=1)
+    fahrzeug_belegt_bis(sim, 800, ab_s=500)  # nach der Lieferung bei 468 s
+    charge, box = binde_von_hand(sim, "RASS1", [1])
+    montage_leert_box_bei(sim, box, 600)
+
+    sim.env.process(sim.versorgung(charge, box))
+    sim.env.run()
+
+    # Geleert bei 600 s, das einzige Fahrzeug ist aber erst bei 800 s frei. Bis dahin bleibt
+    # der Übergabeplatz belegt.
+    assert zeitpunkte(sim, Ereignistyp.LEERBOX_RUECK_BEGINN) == [800.0]
+    assert zeitpunkte(sim, Ereignistyp.RESERVIERUNG_AUFGELOEST, ressource="RASS1.platz_1") == [
+        800.0
+    ]
+    assert zeitpunkte(sim, Ereignistyp.LEERBOX_RUECK_ENDE) == [896.0]
+
+
+def test_frei_gewordener_platz_geht_an_die_wartende_box(anlage, szenarien):
+    sim = mit_abweichungen(anlage, szenarien, stationen__RASS1__uebergabeplaetze=1)
+    erste, erste_box = binde_von_hand(sim, "RASS1", [1], nr=1)
+    zweite, zweite_box = binde_von_hand(sim, "RASS1", [2], nr=2)
+    montage_leert_box_bei(sim, erste_box, 900)
+
+    sim.env.process(sim.versorgung(erste, erste_box))
+    sim.env.process(sim.versorgung(zweite, zweite_box))
+    sim.env.run()
+
+    # Die zweite Box ist bei 744 s fertig und wartet auf den einzigen Platz. Bei 900 s holt
+    # fahrzeug_2 die leere Box ab, im selben Moment bekommt die zweite den Platz und fährt
+    # mit fahrzeug_1. Kein Verklemmen (A-12).
+    assert [(z.zeit_s, z.charge_id) for z in zeilen(sim, Ereignistyp.LIEFERUNG)] == [
+        (468.0, "C001"),
+        (996.0, "C002"),
+    ]
+    assert zeitpunkte(sim, Ereignistyp.LEERBOX_RUECK_ENDE) == [996.0]
+    assert sim.box_an_platz == {"RASS1.platz_1": zweite_box}
+
+
+def test_volle_box_wird_nicht_zurueckgefuehrt(sim):
+    charge, box = binde_von_hand(sim, "RASS1", [1])
+
+    def rueckfuehrung_ohne_montage():
+        yield sim.env.timeout(600)
+        yield from sim.leerboxrueckfuehrung(box, "RASS1.platz_1")
+
+    sim.env.process(sim.versorgung(charge, box))
+    sim.env.process(rueckfuehrung_ohne_montage())
+    with pytest.raises(SimulationsFehler, match="nicht leer"):
         sim.env.run()

@@ -10,8 +10,8 @@ Dieser Bauplan beschreibt, wie der Simulationskern in `src/matsim/modell/simulat
 | --- | --- | --- | --- |
 | 1 | Grundgerüst | #38 | erledigt (`fb2401b`) |
 | 2 | Kommissionierung | #38 | erledigt (`9a6d636`) |
-| 3 | Hintransport und Lieferung | #38 | erledigt |
-| 4 | Leerboxrückführung | #38 | offen |
+| 3 | Hintransport und Lieferung | #38 | erledigt (`e78f292`) |
+| 4 | Leerboxrückführung | #38 | erledigt |
 | 5 | Warteursachen der Versorgungskette | #38 | offen |
 | 6 | Planungsaufruf und Bindung | #27 | offen |
 | 7 | Werkstückumlauf und Montage | #28 | offen |
@@ -480,7 +480,7 @@ Siebzehn Punkte sind offen; sechs davon braucht schon der Durchstich (1 bis 4, 8
 | 1 | Voller Zielpuffer | erst Übergabeplatz reservieren, dann Fahrzeug holen (Abschnitt 7); eingetragen als A-12 | Team; Referenzpaket #18 | Schritt 3 |
 | 2 | Fahrzeugzuordnung | das am längsten freie Fahrzeug, Aufträge in Anfragereihenfolge, Hintransport und Leerbox gleichrangig; eingetragen als A-13 | #18 | Schritt 3 |
 | 3 | Box bei der Bindung | die am längsten freie Box | Team | Schritt 1 |
-| 4 | Leerboxrückführung | sofort nach der Leerung, ins Kistenlager, 96 s (A-09) | #18 | Schritt 4 |
+| 4 | Leerboxrückführung | sofort nach der Leerung, ins Kistenlager, 96 s (A-09); eingetragen als A-14 | #18 | Schritt 4 |
 | 5 | Wiederkehr nach Weiterfahrt | nach `umlaufzeit_s` = 140 s (A-01, A-10) | #18 | #28 |
 | 6 | Station belegt, Satz da | Werkstück wartet davor; Reihenfolge PlannedStart, Auftrag, Position | #18 | #28 |
 | 7 | Zufahrt Lager → RASS1 | neuer Parameter in `anlage.yaml` | AP1, Beobachtung #20 | #28 |

@@ -1,9 +1,9 @@
 """SimPy-Modell der Materialversorgung (AP3).
 
-Stand: Bauplan, Schritt 3. Fertig sind das Grundgerüst (Ressourcen, Zustand, Zeiten,
-Reihenfolge gleichzeitiger Ereignisse, Protokollhilfe), die Kommissionierung und der Hintransport
-bis zur Lieferung. Die übrigen Prozesse folgen in den Schritten 4 bis 8 und lösen bis dahin
-``NotImplementedError`` aus.
+Stand: Bauplan, Schritt 4. Fertig sind das Grundgerüst (Ressourcen, Zustand, Zeiten,
+Reihenfolge gleichzeitiger Ereignisse, Protokollhilfe) und der Weg der Box: Kommissionierung,
+Hintransport bis zur Lieferung und Leerboxrückführung. Die übrigen Prozesse folgen in den
+Schritten 5 bis 8 und lösen bis dahin ``NotImplementedError`` aus.
 
 Die Simulation verarbeitet die Entscheidungen eines Planungsverfahrens mit begrenzten
 Ressourcen. Sie übernimmt keine geplanten Fertigstellungen als Ergebnis und ruft das
@@ -38,6 +38,8 @@ PLANUNG = 9  # der Planungsaufruf, immer zuletzt
 
 #: Name des Kommissionierplatzes im Protokoll (es gibt nur einen).
 KOMMISSIONIERPLATZ = "kommissionierplatz"
+#: Ressource einer Transportbox im Protokoll; welche Box es ist, steht im Feld ``box_id``.
+BOX = "box"
 
 _NR_ZUSCHLAG = 1e-6  # je laufender Nummer; bei gleichem Rang kommt die kleinere Nummer zuerst
 _NR_GRENZE = 100_000  # darüber würde der Zuschlag in den nächsten Rang reichen
@@ -337,9 +339,59 @@ class Simulation:
         self.protokolliere(Ereignistyp.RESERVIERUNG_AUFGELOEST, ressource=fahrzeug, **ids)
         self.melde_anlass(Planungsanlass.KAPAZITAET_FREI, fahrzeug)
 
-    def leerboxrueckfuehrung(self, box, platz):
-        """Prozess: holt die leere Box ab, gibt den Platz frei und bringt sie ins Lager."""
-        raise NotImplementedError("AP3 Schritt 4: Leerboxrückführung")
+    def leerboxrueckfuehrung(self, box: Box, platz: str):
+        """Prozess: holt die leere Box ab, gibt den Platz frei und bringt sie ins Kistenlager.
+
+        Bauplan, Abschnitt 7. Die Montage startet ihn, sobald das letzte Teil entnommen ist
+        (Anschlusspunkt 3). Übergangsregel bis zum Referenzpaket (#18): Rückfahrt sofort, sobald
+        ein Fahrzeug frei ist, ins Kistenlager, dort ist die Box gleich wieder frei (A-14);
+        Fahrzeit wie der Hintransport (A-09).
+        """
+        if self.box_an_platz.get(platz) is not box or box.zustand != BoxZustand.AN_STATION:
+            raise SimulationsFehler(f"Box {box.id} steht nicht auf Übergabeplatz {platz}")
+        if box.plaetze:
+            raise SimulationsFehler(f"Box {box.id} ist nicht leer ({len(box.plaetze)} Teile)")
+        station = platz.split(".")[0]  # Platznamen haben die Form "RASS1.platz_1"
+        ids = {"box_id": str(box.id)}
+
+        # 1  Fahrzeug holen; die Rückfahrt stellt sich mit den Hintransporten an (A-13).
+        #    Bis ein Fahrzeug kommt, bleibt die leere Box auf dem Platz. Hier wartet kein Satz,
+        #    deshalb gibt es keine Warteursache.
+        fahrzeug = yield self.fahrzeuge.get()
+        self.protokolliere(Ereignistyp.RESERVIERT, ressource=fahrzeug, **ids)
+
+        # 2  Abholung: Box aufs Fahrzeug, der Übergabeplatz ist ab jetzt frei.
+        box.zustand = BoxZustand.LEER_ZURUECK
+        del self.box_an_platz[platz]
+        self.protokolliere(
+            Ereignistyp.LEERBOX_RUECK_BEGINN,
+            ressource=fahrzeug,
+            zustand_alt=BoxZustand.AN_STATION,
+            zustand_neu=BoxZustand.LEER_ZURUECK,
+            **ids,
+        )
+        self.uebergabeplaetze[station].put(platz)
+        self.protokolliere(Ereignistyp.RESERVIERUNG_AUFGELOEST, ressource=platz, **ids)
+        self.melde_anlass(Planungsanlass.KAPAZITAET_FREI, platz)
+
+        # 3  Fahrt ins Kistenlager; die Ankunft gibt Box und Fahrzeug frei, also Rang FREIGABE.
+        yield Termin(self.env, self.dauer("fahrzeuge.leerboxruecktransport_s"), FREIGABE, nr=box.id)
+
+        # 4  Box und Fahrzeug sind wieder frei und stellen sich hinten in ihr Regal.
+        box.zustand = BoxZustand.FREI
+        self.protokolliere(
+            Ereignistyp.LEERBOX_RUECK_ENDE,
+            ressource=fahrzeug,
+            zustand_alt=BoxZustand.LEER_ZURUECK,
+            zustand_neu=BoxZustand.FREI,
+            **ids,
+        )
+        self.boxen.put(box)
+        self.protokolliere(Ereignistyp.RESERVIERUNG_AUFGELOEST, ressource=BOX, **ids)
+        self.fahrzeuge.put(fahrzeug)
+        self.protokolliere(Ereignistyp.RESERVIERUNG_AUFGELOEST, ressource=fahrzeug, **ids)
+        self.melde_anlass(Planungsanlass.KAPAZITAET_FREI, BOX)
+        self.melde_anlass(Planungsanlass.KAPAZITAET_FREI, fahrzeug)
 
     def werkstueckumlauf(self, werkstueck):
         """Prozess je Werkstück: Ankunft, Montage bei vollständigem Satz, sonst Weiterfahrt."""
