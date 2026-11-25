@@ -1,6 +1,6 @@
 """Planungsverfahren V0 bis V4 (AP4).
 
-Stand: V0, V1 und V2 umgesetzt; V3 und V4 sind Gerüst.
+Stand: V0 bis V3 umgesetzt; V4 ist Gerüst.
 Steckbriefe und Begründungen: docs/projekt/planungsverfahren.md.
 """
 
@@ -373,19 +373,146 @@ class V2Fuellschwelle(Planungsverfahren):
 
 
 class V3WartezeitDringlichkeit(Planungsverfahren):
-    """Bündelung mit maximaler Wartezeit oder produktionsbezogener Dringlichkeitsgrenze.
+    """Bündelung bis zu einer Zeitschranke: Höchstwartezeit oder Dringlichkeit.
 
-    Parameter: ``max_wartezeit_s`` oder ``dringlichkeit`` (aus dem Produktionsbedarf abgeleitet,
-    keine frei gesetzten Dringlichkeitspunkte).
+    Jeder offene Satz hat einen Fälligkeitszeitpunkt. Er ist das Minimum der eingestellten
+    Grenzen:
+
+    * Höchstwartezeit: ``eingang_s + max_wartezeit_s``,
+    * Dringlichkeit: ``bedarfszeitpunkt_s - vorlauf_s``. Der Bedarfszeitpunkt stammt aus dem
+      Produktionsbedarf (Anforderung), der Vorlauf deckt Kommissionierung und Transport ab.
+      Frei gesetzte Dringlichkeitspunkte gibt es nicht.
+
+    Regel je Planungsaufruf:
+
+    1. Ohne freie Box wird gewartet.
+    2. Die Stationen werden in der Folge ihres ältesten offenen Satzes betrachtet
+       (Eingangsfolge, Gleichstand: kleinere Identität).
+    3. Je Station wird eine Box mit den offenen Sätzen in Eingangsfolge gefüllt, solange
+       Boxpositionen und freier Bestand den jeweils vollständigen Satz decken. Ein Satz ohne
+       ausreichenden Bestand oder ohne Platz in der Box wird übersprungen.
+    4. Die Box wird als Charge mit sofortigem Versand gebunden, wenn
+       a) ein Satz in der Box fällig ist (Zeit >= Fälligkeitszeitpunkt) oder
+       b) alle Boxpositionen belegt sind (weiteres Warten kann nichts mehr bündeln).
+       Sonst wartet die Station.
+    5. Nach einer gebundenen Box wird dieselbe Station erneut geprüft, solange Boxen frei sind.
+
+    Damit gilt die Steckbrief-Regel „Charge mit allen bis dahin offenen Sätzen der Station“,
+    soweit sie in eine Box passen. Sätze, die für sich allein keine zulässige Charge bilden
+    können, werden wie bei V1 nie gebunden und lösen keine Wartefrist aus. Der Anlass ändert
+    die Regel nicht.
+
+    Parameter (mindestens einer Pflicht, keine Ersatzwerte):
+
+    * ``max_wartezeit_s``: Höchstwartezeit eines Satzes in Sekunden, größer 0.
+    * ``vorlauf_s``: Vorlauf vor dem Bedarfszeitpunkt in Sekunden, mindestens 0. Er ist aus den
+      Zeitansätzen in ``config/anlage.yaml`` abzuleiten (Kommissionierung und Hintransport).
+
+    Sind beide gesetzt, gilt die zuerst erreichte Grenze.
     """
 
     name = "V3"
 
+    @staticmethod
+    def _zeitparameter(
+        parameter: Mapping[str, object], name: str, null_erlaubt: bool
+    ) -> float | None:
+        """Liest einen optionalen Zeitparameter in Sekunden; ungültige Werte sind ein Fehler."""
+        wert = parameter.get(name)
+        if wert is None:
+            return None
+        gueltig = isinstance(wert, int | float) and not isinstance(wert, bool)
+        if not gueltig or wert < 0 or (wert == 0 and not null_erlaubt):
+            grenze = ">= 0" if null_erlaubt else "> 0"
+            raise ValueError(f"{name} muss eine Zahl {grenze} sein: {wert!r}")
+        return float(wert)
+
+    def __init__(self, **parameter) -> None:
+        super().__init__(**parameter)
+        unbekannt = set(parameter) - {"max_wartezeit_s", "vorlauf_s"}
+        if unbekannt:
+            raise ValueError(f"V3 kennt diese Parameter nicht: {sorted(unbekannt)}")
+        self._max_wartezeit_s = self._zeitparameter(
+            parameter, "max_wartezeit_s", null_erlaubt=False
+        )
+        self._vorlauf_s = self._zeitparameter(parameter, "vorlauf_s", null_erlaubt=True)
+
+    def _faellig_ab(self, anforderung: Anforderung) -> float:
+        """Fälligkeitszeitpunkt des Satzes: die zuerst erreichte eingestellte Grenze."""
+        if self._max_wartezeit_s is None and self._vorlauf_s is None:
+            raise ValueError("V3 braucht max_wartezeit_s, vorlauf_s oder beide")
+        grenzen = []
+        if self._max_wartezeit_s is not None:
+            grenzen.append(anforderung.eingang_s + self._max_wartezeit_s)
+        if self._vorlauf_s is not None:
+            grenzen.append(anforderung.bedarfszeitpunkt_s - self._vorlauf_s)
+        return min(grenzen)
+
+    @staticmethod
+    def _nach_station(zustand: Planungszustand) -> dict[str, list[Anforderung]]:
+        """Zulässige offene Sätze je Station, Stationen nach ihrem ältesten Satz geordnet."""
+        je_station: dict[str, list[Anforderung]] = {}
+        for anforderung in _in_eingangsfolge(zustand.offene_anforderungen):
+            if _satz_zulaessig(anforderung, zustand):
+                je_station.setdefault(anforderung.station, []).append(anforderung)
+        return je_station
+
+    @staticmethod
+    def _fuelle_box(
+        saetze: list[Anforderung], bestand: Mapping[int, int], positionen: int
+    ) -> list[Anforderung]:
+        """Sätze in Eingangsfolge, solange Positionen und Bestand reichen."""
+        lokal = dict(bestand)
+        frei = positionen
+        gewaehlt: list[Anforderung] = []
+        for anforderung in saetze:
+            if anforderung.satz.positionen > frei or not _bestand_reicht(anforderung, lokal):
+                continue
+            _bestand_abziehen(anforderung, lokal)
+            frei -= anforderung.satz.positionen
+            gewaehlt.append(anforderung)
+        return gewaehlt
+
     def entscheide(self, zustand: Planungszustand, anlass: Anlass) -> list[Chargenentscheidung]:
-        raise NotImplementedError("AP4: V3 Wartezeit/Dringlichkeit")
+        bestand = dict(zustand.freier_bestand)
+        freie_boxen = zustand.freie_boxen
+        chargen: list[Chargenentscheidung] = []
+        for station, saetze in self._nach_station(zustand).items():
+            while freie_boxen > 0 and saetze:
+                box = self._fuelle_box(saetze, bestand, zustand.box_positionen)
+                if not box:
+                    break
+                voll = sum(a.satz.positionen for a in box) >= zustand.box_positionen
+                faellig = any(zustand.zeit_s >= self._faellig_ab(a) for a in box)
+                if not voll and not faellig:
+                    break
+                for anforderung in box:
+                    _bestand_abziehen(anforderung, bestand)
+                freie_boxen -= 1
+                chargen.append(
+                    Chargenentscheidung(
+                        station=station,
+                        anforderung_ids=tuple(a.id for a in box),
+                        versand_fruehestens_s=zustand.zeit_s,
+                    )
+                )
+                gebunden = {a.id for a in box}
+                saetze = [a for a in saetze if a.id not in gebunden]
+        return chargen
 
     def naechste_wartefrist(self, zustand: Planungszustand) -> float | None:
-        raise NotImplementedError("AP4: V3 Wartezeit/Dringlichkeit")
+        """Frühester künftiger Fälligkeitszeitpunkt eines zulässigen offenen Satzes.
+
+        Bereits fällige Sätze liefern keine Frist mehr: Werden sie trotzdem nicht gebunden,
+        fehlt eine Box oder Bestand. Eine frei werdende Box löst den Anlass „Kapazität frei“
+        aus. Ohne zulässige offene Sätze gibt es keine Frist.
+        """
+        termine = [
+            self._faellig_ab(anforderung)
+            for saetze in self._nach_station(zustand).values()
+            for anforderung in saetze
+        ]
+        return min((t for t in termine if t > zustand.zeit_s), default=None)
 
 
 class V4EigeneVerbesserung(Planungsverfahren):
