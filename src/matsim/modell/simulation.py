@@ -1,8 +1,8 @@
 """SimPy-Modell der Materialversorgung (AP3).
 
-Stand: Grundgerüst (Bauplan, Schritt 1). Ressourcen, Zustand, Zeiten, die Reihenfolge
-gleichzeitiger Ereignisse und die Protokollhilfe sind fertig. Die Prozesse folgen in den
-Schritten 2 bis 8 und lösen bis dahin ``NotImplementedError`` aus.
+Stand: Bauplan, Schritt 2. Fertig sind das Grundgerüst (Ressourcen, Zustand, Zeiten,
+Reihenfolge gleichzeitiger Ereignisse, Protokollhilfe) und die Kommissionierung. Die übrigen
+Prozesse folgen in den Schritten 3 bis 8 und lösen bis dahin ``NotImplementedError`` aus.
 
 Die Simulation verarbeitet die Entscheidungen eines Planungsverfahrens mit begrenzten
 Ressourcen. Sie übernimmt keine geplanten Fertigstellungen als Ergebnis und ruft das
@@ -21,8 +21,8 @@ from simpy.events import Event
 from matsim.daten.zeiten import Zeitverteilung, lade_verteilungen
 from matsim.kennzahlen.ereignisprotokoll import Ereignis, Ereignisprotokoll, Ereignistyp
 from matsim.modell.anlage import AnlagenFehler, mit_abweichungen, wert
-from matsim.modell.typen import Box, Produktauftrag
-from matsim.regeln.basis import Planungsanlass, Planungsverfahren, Planungszustand
+from matsim.modell.typen import Box, Boxplatz, BoxZustand, Charge, Produktauftrag
+from matsim.regeln.basis import Anlass, Planungsanlass, Planungsverfahren, Planungszustand
 
 # --- Reihenfolge gleichzeitiger Ereignisse (docs/projekt/logikstruktur.md, Abschnitt 3) ---------
 # SimPy arbeitet Ereignisse derselben Zeit nach Priorität ab, kleinere zuerst. Es selbst nutzt
@@ -34,6 +34,9 @@ ANKUNFT = 4  # ein Werkstück kommt an einer Station an
 BEDARF = 5  # ein Produktauftrag kommt an
 FRIST = 6  # eine Wartefrist des Verfahrens läuft ab
 PLANUNG = 9  # der Planungsaufruf, immer zuletzt
+
+#: Name des Kommissionierplatzes im Protokoll (es gibt nur einen).
+KOMMISSIONIERPLATZ = "kommissionierplatz"
 
 _NR_ZUSCHLAG = 1e-6  # je laufender Nummer; bei gleichem Rang kommt die kleinere Nummer zuerst
 _NR_GRENZE = 100_000  # darüber würde der Zuschlag in den nächsten Rang reichen
@@ -141,6 +144,8 @@ class Simulation:
         self.box_an_platz: dict[str, Box] = {}  # welche Box auf welchem Übergabeplatz steht
         self.chargen_in_versorgung = 0  # gebunden, aber noch nicht abgeliefert (für V0)
         self.warteursache: dict = {}  # laufende Wartezeit je Satz (Schritt 5 und 6)
+        #: Gemeldete Planungsanlässe; ab Schritt 6 löst der erste je Zeitpunkt die Planung aus.
+        self.anlaesse: list[Anlass] = []
         self.werkstuecke: dict = {}  # Werkstücke mit Fortschritt (Schritt 7)
 
     def _regal(self, dinge: Iterable[Any]) -> simpy.Store:
@@ -174,8 +179,12 @@ class Simulation:
     # --- Planung (Bauplan, Abschnitt 6; Issue #27) ---------------------------------------------
 
     def melde_anlass(self, art: Planungsanlass, detail: str = "") -> None:
-        """Merkt einen Planungsanlass vor; geplant wird je Zeitpunkt einmal, zuletzt."""
-        raise NotImplementedError("AP3 Schritt 6 (#27): Anlässe sammeln")
+        """Merkt einen Planungsanlass vor; geplant wird je Zeitpunkt einmal, zuletzt.
+
+        Stand Schritt 2: Die Anlässe werden nur gesammelt. Den Planungsaufruf dazu ergänzt
+        Schritt 6 (#27).
+        """
+        self.anlaesse.append(Anlass(art, self.env.now, detail))
 
     def planungszustand(self) -> Planungszustand:
         """Momentaufnahme für das Planungsverfahren (nur der jetzt bekannte Zustand)."""
@@ -195,9 +204,70 @@ class Simulation:
         """Prozess je Charge: Kommissionierung, dann Hintransport bis zur Lieferung."""
         raise NotImplementedError("AP3 Schritte 2 und 3: Versorgungskette")
 
-    def kommissionierung(self, charge, box):
-        """Belegt den Kommissionierplatz, pickt je Teil und legt die Teile in die Box."""
-        raise NotImplementedError("AP3 Schritt 2: Kommissionierung")
+    def kommissionierung(self, charge: Charge, box: Box):
+        """Belegt den Kommissionierplatz, pickt die Sätze der Charge und legt die Teile in die Box.
+
+        Bauplan, Abschnitt 7, Schritte 0 bis 5. Die Charge ist schon gebunden: Box reserviert,
+        Bestand vom freien Bestand abgezogen (Planung, Schritt 6). Dauer am Platz:
+        Vorlauf + Teile × Pickzeit + (min(Quellboxen, Teile) − 1) × Quellboxwechsel (A-11).
+        """
+        teile = [
+            (satz.anforderung_id, pno)
+            for satz in charge.saetze
+            for pno, menge in satz.komponenten
+            for _ in range(menge)
+        ]
+        if box.id != charge.box_id or box.zustand != BoxZustand.IN_KOMMISSIONIERUNG or box.plaetze:
+            raise SimulationsFehler(
+                f"Charge {charge.id}: Box {box.id} ist nicht die leere, reservierte Box "
+                f"{charge.box_id} (Zustand {box.zustand}, {len(box.plaetze)} Teile)"
+            )
+        if len(teile) > box.positionen:
+            raise SimulationsFehler(
+                f"Charge {charge.id}: {len(teile)} Teile passen nicht in die Box"
+            )
+        ids = {"charge_id": charge.id, "box_id": str(box.id)}
+
+        # 0  Will das Verfahren erst später versenden, beginnt die Kommissionierung erst dann.
+        if charge.versand_fruehestens_s > self.env.now:
+            yield self.env.timeout(charge.versand_fruehestens_s - self.env.now)
+
+        # 1  Kommissionierplatz anfordern; ist er belegt, stellt sich die Charge an.
+        with self.kommissionierplatz.request() as anfrage:
+            yield anfrage
+            self.protokolliere(Ereignistyp.RESERVIERT, ressource=KOMMISSIONIERPLATZ, **ids)
+            self.protokolliere(
+                Ereignistyp.KOMMISSIONIERUNG_BEGINN, ressource=KOMMISSIONIERPLATZ, **ids
+            )
+
+            # 2  Vorlauf: Ziel- und Quellboxen werden an den Platz gebracht.
+            yield self.env.timeout(self.dauer("kommissionierplatz.vorlauf_s"))
+
+            # 3  Picks, Satz für Satz in der Reihenfolge der Charge; jedes Teil bleibt seiner
+            #    Anforderung zugeordnet.
+            for anforderung_id, pno in teile:
+                yield self.env.timeout(self.dauer("kommissionierplatz.pickzeit_je_teil_s"))
+                box.plaetze.append(Boxplatz(len(box.plaetze) + 1, pno, anforderung_id))
+                self.protokolliere(
+                    Ereignistyp.TEIL_GEPICKT,
+                    anforderung_id=anforderung_id,
+                    ressource=KOMMISSIONIERPLATZ,
+                    pno=pno,
+                    menge=1,
+                    **ids,
+                )
+
+            # 4  Quellboxwechsel; eine Charge mit nur einem Teil braucht keinen.
+            quellboxen = wert(self.anlage, "kommissionierplatz.quellboxen_je_auftrag")
+            for _ in range(min(quellboxen, len(teile)) - 1):
+                yield self.env.timeout(self.dauer("kommissionierplatz.quellboxwechsel_s"))
+
+            # 5  Freigabe des Platzes im Rang FREIGABE, damit gleichzeitige Lieferungen,
+            #    Ankünfte und die Planung den Platz schon frei sehen (Abschnitt 9).
+            yield Termin(self.env, 0, FREIGABE)
+        self.protokolliere(Ereignistyp.KOMMISSIONIERUNG_ENDE, ressource=KOMMISSIONIERPLATZ, **ids)
+        self.protokolliere(Ereignistyp.RESERVIERUNG_AUFGELOEST, ressource=KOMMISSIONIERPLATZ, **ids)
+        self.melde_anlass(Planungsanlass.KAPAZITAET_FREI, KOMMISSIONIERPLATZ)
 
     def hintransport(self, charge, box):
         """Reserviert den Übergabeplatz, holt ein Fahrzeug, fährt und liefert ab."""
