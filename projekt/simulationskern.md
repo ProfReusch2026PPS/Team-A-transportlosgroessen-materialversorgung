@@ -1,6 +1,6 @@
 # Simulationskern: Bauplan
 
-Verantwortlich: AP3 (Laurens Rüther; Review: Mehmet Örücü). Stand: 25.11.2026, Schritte 1 und 2 von 9 umgesetzt.
+Verantwortlich: AP3. Laurens Rüther: Grundgerüst, Versorgungskette, Durchstich und V0-Validierung; Mehmet Örücü: Planung (#27) und Montage (#28); Review gegenseitig. Stand: 25.11.2026, Schritte 1 bis 5 von 9 umgesetzt.
 
 Dieser Bauplan beschreibt, wie der Simulationskern in `src/matsim/modell/simulation.py` aufgebaut ist und in welchen Schritten er entsteht. Er ergänzt die [Logikstruktur](logikstruktur.md), die [Kennzahlen](kennzahlen.md) und die [Planungsverfahren](planungsverfahren.md). Zahlen mit dem Vermerk „Prototyp“ stammen aus einem Wegwerf-Prototyp, mit dem der Plan vor der Umsetzung geprüft wurde; er liegt nicht im Repo. Maßgeblich sind die Zahlen der Tests.
 
@@ -44,9 +44,9 @@ Der Simulationskern ist die Klasse `Simulation` in `src/matsim/modell/simulation
 | --- | --- | --- | --- |
 | Grundgerüst: Zustand, Ressourcen, Zeiten | Laurens | #38 | erledigt |
 | Versorgungskette: Kommissionierung bis Leerboxrückführung | Laurens | #38 | erledigt |
-| Planungsaufruf, Chargenbindung, Wartefristen, Ereignisreihenfolge | Laurens (Übernahme mit Mehmet abzustimmen) | #27 | offen |
-| Werkstückumlauf und Montage | Laurens (Übernahme mit Mehmet abzustimmen) | #28 | offen |
-| Review der AP3-PRs | Mehmet | – | – |
+| Planungsaufruf, Chargenbindung, Wartefristen, Ereignisreihenfolge | Mehmet | #27 | offen |
+| Werkstückumlauf und Montage | Mehmet | #28 | offen |
+| Review der AP3-PRs | gegenseitig: Mehmet die von Laurens, Laurens die von Mehmet | – | – |
 | Verfahren V0 bis V4 | Luis (AP4) | #7 bis #10, #12 | V0 bis V3 fertig, V4 offen |
 | Bedarfsverläufe, Prüfregeln, Kennzahlen | AP5 (Team) | – | Gerüst |
 | Referenzregeln (Fahrzeugzuordnung, Übergabe, Wiederkehr …) | Dozent, Referenzpaket | #18 | fehlt |
@@ -491,7 +491,7 @@ Siebzehn Punkte sind offen; sechs davon braucht schon der Durchstich (1 bis 4, 8
 | 9 | Bedarfszeitpunkt | geplante Ankunft ohne Warten (Abschnitt 5) | AP4 mit AP2 | V3 |
 | 10 | Abbildung der Kommissionierung | Variante b für den Durchstich, danach entscheiden (a, b oder c) | Laurens mit AP2 | nach dem Durchstich |
 | 11 | Startbestand für 4 Produkte (L-11) | Anfangsbestand als Szenarioannahme erhöhen oder Mangel als Versuchsfaktor | AP5 | Auswertung M2 |
-| 12 | Planungsaufrufe | einer je Zeitpunkt (Abschnitt 6) | Laurens | #27 |
+| 12 | Planungsaufrufe | einer je Zeitpunkt (Abschnitt 6) | Mehmet | #27 |
 | 13 | Versand später als jetzt | Kommissionierung erst ab Versandzeit, Warten zählt als Bündelung | AP4 mit AP5 | nur V4 |
 | 14 | Endkriterium | alle Anforderungen montiert und alle Boxen zurück | AP5 | Durchstich |
 | 15 | Bedarfsmuster `spitze` | kommen die 6 Spitzenprodukte zu den 12 hinzu? | AP5 | Stress 1 |
@@ -502,7 +502,7 @@ Siebzehn Punkte sind offen; sechs davon braucht schon der Durchstich (1 bis 4, 8
 
 ## 13 Anschlusspunkte und offene Abstimmungen
 
-Laurens baut alle AP3-Teile selbst, auch die aus #27 und #28. Die vier Anschlusspunkte bleiben trotzdem: Sie trennen die Teile im Code, sodass jeder Teil für sich testbar ist und Fehler sich einem Teil zuordnen lassen.
+Laurens baut Grundgerüst, Versorgungskette, Durchstich und V0-Validierung, Mehmet die Planung (#27) und die Montage (#28); so am 25.11.2026 abgestimmt. Die vier Anschlusspunkte trennen diese Teile im Code: Jeder Teil ist für sich testbar, und Fehler lassen sich einem Teil zuordnen. Die Planung und die Montage setzen auf dem Stand nach Schritt 5 auf (Branch `ap3/durchstich`, nach dem Merge `main`).
 
 | Nr | Was passiert | von → nach | Umsetzung im Code |
 | --- | --- | --- | --- |
@@ -511,7 +511,7 @@ Laurens baut alle AP3-Teile selbst, auch die aus #27 und #28. Die vier Anschluss
 | 3 | Box leer, Rückführung startet | Montage → Rückführung | `self.env.process(self.leerboxrueckfuehrung(box, platz))` |
 | 4 | Ressource frei, neu planen | alle → Planung | `self.melde_anlass(Planungsanlass.KAPAZITAET_FREI, detail)` |
 
-**Im Grundgerüst, weil alle Teile sie nutzen:** die Ressourcen und der Zustand aus Abschnitt 3, `Termin` mit den Rängen (Abschnitt 9), `dauer()` (Abschnitt 4), eine kleine Hilfe `protokolliere(...)` für Zeilen im Protokoll und der Zähler `chargen_in_versorgung` (+1 bei der Bindung, −1 bei der Lieferung).
+**Im Grundgerüst, weil alle Teile sie nutzen:** die Ressourcen und der Zustand aus Abschnitt 3, `Termin` mit den Rängen (Abschnitt 9), `dauer()` (Abschnitt 4), eine kleine Hilfe `protokolliere(...)` für Zeilen im Protokoll und der Zähler `chargen_in_versorgung` (+1 bei der Bindung, −1 bei der Lieferung). Seit Schritt 4 und 5 außerdem die Konstante `BOX` (Ressourcenname einer Box im Protokoll; die Bindung schreibt damit `reserviert`, die Leerboxrückführung `reservierung_aufgeloest`) und `setze_warteursache(anforderung_ids, ursache)`, mit der auch die Planung die Ursachen Bestand, Box und Bündelung setzt.
 
 **Reihenfolge der Arbeit:**
 
@@ -534,7 +534,7 @@ Laurens baut alle AP3-Teile selbst, auch die aus #27 und #28. Die vier Anschluss
 
 **Offene Abstimmungen:**
 
-- [ ] Übernahme von #27 und #28 mit Mehmet abstimmen und die Issues umhängen
+- [x] Aufteilung mit Mehmet geklärt (25.11.2026): Mehmet baut #27 und #28, Laurens reviewt
 - [ ] Ein Planungsaufruf je Zeitpunkt oder einer je Anlass (Abschnitt 6)
 - [ ] Übergangsregel „erst Platz, dann Fahrzeug“ (Abschnitt 7), bis das Referenzpaket da ist (#18)
 - [ ] Werkstück mit vollständigem Satz wartet vor belegter Station (Abschnitt 8)
@@ -550,8 +550,8 @@ Neun Schritte, jeder mit eigenem Test und eigenem Commit; 8 und 9 sind die Meile
 | 3 | Hintransport und Lieferung | Laurens | `Store.get` und `put`, `yield from` | Lieferung 468 s; einziges Fahrzeug bis 500 s belegt: 596 s; Station mit einem belegten Platz: Box wartet an der Kommissionierung, Fahrzeug bleibt frei |
 | 4 | Leerboxrückführung | Laurens | ein Prozess startet einen anderen | Box bei 600 s geleert: Platz frei bei 600 s, Box frei bei 696 s, Anlass „Kapazität frei“ bei 600 s (Platz) und bei 696 s (Box, Fahrzeug) |
 | 5 | Warteursachen der Kette | Laurens | – | RASS1-Satz: 326 s Kommissionierung, 0 s Transport und Stationskapazität; 326 + 46 + 96 = 468 |
-| 6 | Planungsaufruf und Bindung | Laurens (#27) | Ereignisse sammeln, Fristen | Fälle aus #27, etwa: fehlerhafte Liste bindet nichts |
-| 7 | Werkstückumlauf und Montage | Laurens (#28) | `PriorityResource` | Fälle aus #28, etwa: Ankunft 10 s, Wiederkehr 20 s, Lieferung 11 s, Montage bei 30 s |
+| 6 | Planungsaufruf und Bindung | Mehmet (#27) | Ereignisse sammeln, Fristen | Fälle aus #27, etwa: fehlerhafte Liste bindet nichts |
+| 7 | Werkstückumlauf und Montage | Mehmet (#28) | `PriorityResource` | Fälle aus #28, etwa: Ankunft 10 s, Wiederkehr 20 s, Lieferung 11 s, Montage bei 30 s |
 | 8 | Durchstich: `bedarfseingang()`, `laufe()`, Laufende, Restbedarf, V1 im Basisfall | Laurens | `env.run(until=…)` | Lauf endet regulär, Protokoll als CSV, Invarianten-Tests ohne `NotImplementedError` aus der Simulation (M2) |
 | 9 | V0 gegen den 09.11.2026 | Laurens | – | Reihenfolge RASS1, RASS2, RASS3; Lieferungen im Prototyp nach 9:20, 18:40, 26:51 min gegen echt 12:32, 29:43, 39:54 min, Abweichung begründet (M3) |
 
