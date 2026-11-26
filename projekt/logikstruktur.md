@@ -128,7 +128,11 @@ Ein Werkstück, das an einer Station ankommt, wird nur montiert, wenn eine Box a
 
 ### Gleichzeitige Ereignisse
 
-Zeiten sind Sekunden. Bei gleicher Zeit gilt die Reihenfolge: Ressourcenfreigaben, dann Lieferungen, dann Werkstückankünfte, dann Planungsaufrufe. Innerhalb gleicher Art entscheidet die kleinere Identität. Die laufende Nummer im Protokoll hält die tatsächliche Reihenfolge fest. AP3 bestätigt oder ändert diese Regel mit Begründung, bevor der erste Vergleichslauf entsteht.
+Zeiten sind Sekunden. Bei gleicher Zeit gilt die Reihenfolge: Ressourcenfreigaben, dann Lieferungen, dann Werkstückankünfte, dann Bedarfseingänge, dann Ablauf von Wartefristen, zuletzt Planungsaufrufe. Innerhalb gleicher Art entscheidet die kleinere Identität (laufende Nummer, z. B. W001 vor W002). Die laufende Nummer im Protokoll hält die tatsächliche Reihenfolge fest.
+
+Begründung: Ein Werkstück, das in derselben Sekunde wie seine Box ankommt, soll montiert werden und nicht eine Runde umsonst fahren. Der Planungsaufruf kommt zuletzt, damit er alles sieht, was in dieser Sekunde frei geworden oder angekommen ist (für V0 etwa den schon verringerten Wert `chargen_in_versorgung`, Abschnitt 4). Bedarfseingang und Fristablauf sind gegenüber der ersten Fassung als eigene Ränge vor der Planung ergänzt (AP3, 25.11.2026).
+
+Umsetzung: `Termin` in `src/matsim/modell/simulation.py` reiht ein Ereignis mit der Priorität seines Rangs ein (Freigabe 2, Lieferung 3, Ankunft 4, Bedarf 5, Frist 6, Planung 9) plus `nr × 10⁻⁶` für die Identität. Nach der Planung gleicht die Simulation mit Rang 10 die Warteursachen ab; das ist kein fachliches Ereignis, es schreibt nur die Wartezeiten ins Protokoll. SimPy arbeitet gleichzeitige Ereignisse nach Priorität ab, kleinere zuerst. Seine eigenen Ereignisse (Prozessstart, Zuteilung einer frei gewordenen Ressource) haben Priorität 0 oder 1 und laufen damit vor allen eigenen Rängen: Eine frei gewordene Ressource ist schon neu zugeteilt, bevor eine Lieferung derselben Sekunde verarbeitet wird. Geprüft in `tests/test_simulation_grundgeruest.py`.
 
 ## 4. Planungsschnittstelle
 

@@ -101,3 +101,17 @@ class Reservierung:
     objekt: str
     anforderung_id: str
     menge: int = 1
+
+
+@dataclass(frozen=True)
+class Produktauftrag:
+    """Ein Eintrag im vorab erzeugten Bedarfsverlauf (Schnittstelle Runner → Simulation).
+
+    ``eingang_s``: Bedarfseingang, die Anforderungen für RASS1 bis RASS3 entstehen.
+    ``freigabe_s``: Auftragsfreigabe, das Werkstück wird ausgelagert. Bis AP5 den Zeitpunkt des
+    Bedarfseingangs festlegt (versuchsplan.md, Punkt 2), gilt ``freigabe_s = eingang_s``.
+    """
+
+    nr: int
+    eingang_s: float
+    freigabe_s: float

@@ -6,6 +6,7 @@ MES-Werte, abgeleitete Werte, Annahmen und offene Punkte, wie es die Aufgabenste
 
 from __future__ import annotations
 
+import copy
 from math import isfinite
 from pathlib import Path
 from typing import Any
@@ -195,7 +196,15 @@ def _pruefe_station(
 
 def lade_anlage(pfad: Path = ANLAGE) -> dict[str, Any]:
     """Lädt S1 und prüft Struktur, Herkunft, Mengen, Dauern und Satz-/Boxregeln."""
-    daten = yaml.safe_load(pfad.read_text(encoding="utf-8"))
+    return pruefe_anlage(yaml.safe_load(pfad.read_text(encoding="utf-8")))
+
+
+def pruefe_anlage(daten: Any) -> dict[str, Any]:
+    """Prüft eine eingelesene Anlagenbeschreibung wie :func:`lade_anlage` und gibt sie zurück.
+
+    Getrennt vom Laden, damit auch eine im Speicher geänderte Anlage (Szenario-Abweichungen,
+    :func:`mit_abweichungen`) dieselbe Prüfung durchläuft.
+    """
     if not isinstance(daten, dict):
         raise AnlagenFehler("anlage: erwartet eine Zuordnung von Konfigurationsabschnitten")
     fehler: list[str] = []
@@ -212,6 +221,34 @@ def lade_anlage(pfad: Path = ANLAGE) -> dict[str, Any]:
     if fehler:
         raise AnlagenFehler("\n".join(fehler))
     return daten
+
+
+def mit_abweichungen(
+    daten: dict[str, Any], abweichungen: dict[str, Any], quelle: str
+) -> dict[str, Any]:
+    """Kopie der Anlage mit den Abweichungen eines Szenarios (``anlage_abweichungen``).
+
+    ``abweichungen`` ordnet Punktpfaden neue Werte zu, z. B. ``{"box.transportboxen_frei": 3}``.
+    Jeder geänderte Parameter bekommt ``herkunft: annahme`` und das Szenario als Beleg. Die Kopie
+    wird vollständig neu geprüft; die übergebene Anlage bleibt unverändert. Ohne Abweichungen
+    kommt die Anlage selbst zurück.
+    """
+    if not abweichungen:
+        return daten
+    kopie = copy.deepcopy(daten)
+    for pfad, neuer_wert in abweichungen.items():
+        knoten: Any = kopie
+        for teil in pfad.split("."):
+            if not isinstance(knoten, dict):
+                knoten = None
+                break
+            # Teilenummern sind in YAML ganzzahlige Schlüssel (wie in ``wert``).
+            schluessel = int(teil) if teil.isdigit() and int(teil) in knoten else teil
+            knoten = knoten.get(schluessel)
+        if not isinstance(knoten, dict) or "herkunft" not in knoten:
+            raise AnlagenFehler(f"Szenario {quelle}: {pfad} ist kein Parameter der Anlage")
+        knoten.update(wert=neuer_wert, herkunft="annahme", beleg=f"Szenario {quelle}")
+    return pruefe_anlage(kopie)
 
 
 def wert(daten: dict[str, Any], pfad: str) -> Any:

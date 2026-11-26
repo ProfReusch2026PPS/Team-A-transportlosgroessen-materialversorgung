@@ -9,7 +9,7 @@ Kennzahlen brauchen definierte Zeit-, Mengen- und Zustandsdaten; die Lehrunterla
 | Nr. | Kennzahl | Definition | Formel | Abgrenzung |
 |---|---|---|---|---|
 | K1 | Transportzahl | Anzahl der Hintransporte im Auswertungszeitraum | Anzahl `transport_beginn` | Leerboxrückführungen werden getrennt gezählt (Anzahl `leerbox_rueck_beginn`) |
-| K2 | Fahrzeugbelegungszeit | Zeit, in der Fahrzeuge an einen Auftrag gebunden sind | Summe über alle Fahrzeuge und Aufträge: Freigabe minus Bindung | enthält Warten vor vollem Zielpuffer; Hin- und Rückfahrt getrennt ausweisen |
+| K2 | Fahrzeugbelegungszeit | Zeit, in der Fahrzeuge an einen Auftrag gebunden sind | Summe über alle Fahrzeuge und Aufträge: Freigabe minus Bindung | enthält kein Warten vor vollem Zielpuffer: Die Box wartet darauf an der Kommissionierung, ohne Fahrzeug (A-12); Hin- und Rückfahrt getrennt ausweisen |
 | K3 | Boxauslastung | Anteil belegter Boxpositionen je Hintransport | belegte Positionen / 8, gemittelt über die Hintransporte | zusätzlich Verteilung angeben, nicht nur den Mittelwert |
 | K4 | Zeit bis zur Materialbereitstellung | je Anforderung: Zeit vom Bedarfseingang bis zur Lieferung am Übergabeplatz | t(`lieferung`) − t(`bedarf_eingang`) | Median, Mittel und 90-%-Quantil je Station |
 | K5 | Materialbedingte Montageverzögerung | je Anforderung: Verzögerung des Montagebeginns, die auf fehlendes Material entfällt | t(`montage_beginn`) − t(erste `werkstueck_ankunft` an der Station), sofern bei der ersten Ankunft der Satz fehlte; sonst 0 | Verzögerung durch belegte Station oder laufende Vorgängerarbeit zählt nicht dazu |
@@ -27,10 +27,10 @@ Jede Wartezeit eines Satzes wird genau einer Ursache zugeordnet. Die Zeit vom Be
 | Phase des Satzes | Mögliche Ursachen | Zuordnung |
 |---|---|---|
 | vor der Bindung in eine Charge | Bestand, Box, Bündelung | Rangfolge, siehe unten |
-| gebunden, wartet auf den Kommissionierplatz | Kommissionierung | eindeutig |
+| gebunden, wartet auf den Kommissionierplatz und den Vorlauf | Kommissionierung | eindeutig |
 | in der Box, während andere Teile der Charge gepickt werden | Kommissionierung | eindeutig; zusätzlich als „bündelungsbedingte Pickzeit“ auswertbar |
-| Box fertig, wartet auf ein Fahrzeug | Transport | eindeutig |
-| Box am Fahrzeug, kein Übergabeplatz frei | Stationskapazität | eindeutig |
+| Box fertig, kein Übergabeplatz frei (die Box wartet an der Kommissionierung, A-12) | Stationskapazität | eindeutig |
+| Übergabeplatz reserviert, wartet auf ein Fahrzeug | Transport | eindeutig |
 
 **Rangfolge vor der Bindung**, wenn mehrere Ursachen gleichzeitig vorliegen:
 
