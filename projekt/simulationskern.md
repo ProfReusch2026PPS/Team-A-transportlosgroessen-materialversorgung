@@ -6,6 +6,8 @@ Dieser Bauplan beschreibt, wie der Simulationskern in `src/matsim/modell/simulat
 
 ## Stand der Umsetzung
 
+Nachtrag #27: **Schritt 6 ist auf dem Planungsbranch umgesetzt und getestet**. Der Nachweis für diesen Schritt steht in Abschnitt 6; die folgende Übersicht beschreibt seinen Ausgangsstand.
+
 | Schritt | Inhalt | Issue | Stand |
 | --- | --- | --- | --- |
 | 1 | Grundgerüst | #38 | erledigt (`fb2401b`) |
@@ -254,9 +256,11 @@ Die Simulation sammelt alle Anlässe eines Zeitpunkts und ruft das Verfahren dan
 
 Das Verfahren bekommt Kopien. So kann es den Zustand nicht verändern, und gebundene Chargen tauchen nie wieder als offen auf.
 
-**Veraltete Fristen:** Jede neue Frist erhöht einen Zähler `frist_nr`. Das Frist-Ereignis merkt sich seine Nummer und meldet nur dann einen Anlass, wenn sie noch die aktuelle ist. Eine alte Frist läuft so ins Leere, ohne Doppelbindung.
+**Veraltete Fristen:** Der Kern merkt sich das aktuelle `Termin`-Objekt. Nur dieses Ereignis darf bei Ablauf einen Anlass melden. Eine neue Frist ersetzt es, `None` entwertet es. Eine alte Frist läuft ins Leere, ohne Doppelbindung oder zusätzlichen Aufruf.
 
-**Warum ein Aufruf je Zeitpunkt:** Alle Anlässe desselben Zeitpunkts sehen denselben Zustand. V0 und V1 werten die Art des Anlasses nicht aus. Ein Aufruf je Anlass würde nur Leeraufrufe ins Protokoll schreiben. Ein Aufruf je Anlass ginge ebenfalls; festgelegt wird es in Schritt 6.
+**Warum ein Sammelaufruf:** Alle bis zum Planungsrang eingegangenen Anlässe desselben Zeitpunkts sehen denselben Zustand. Ein Aufruf je Meldung würde lediglich denselben Zustand mehrfach auswerten. Sonderfall synthetische Nulldauern: Gibt die *erst durch diese Bindung* gestartete Versorgung sofort Kapazität frei, ist das eine neue Ursache. Sie stößt bei verbleibendem Bedarf eine weitere Runde an, ohne einen Bedarf doppelt zu binden.
+
+**Einstieg ohne Runner:** Für einen Handfall je Stationsbedarf `sim.melde_bedarf(anforderung)` aufrufen und `sim.env.run(until=...)` ausführen. Die Methode reiht Bedarfseingänge zeitgerecht ein und erzeugt keine Werkstücke. Die Erzeugung von Produktverläufen und das reguläre Laufende bleiben Schritt 8. Beispiele und exakte Abnahmetests: [test_simulation_planung.py](../tests/test_simulation_planung.py); [Schnittstellenverhalten](logikstruktur.md#ablauf-eines-planungsaufrufs-27).
 
 **Was V0 davon braucht:** Die Lieferung senkt `chargen_in_versorgung`, bevor der Planungsaufruf desselben Zeitpunkts läuft. Das stellt die Reihenfolge in Abschnitt 9 sicher (Lieferungen vor Planung).
 

@@ -1,7 +1,7 @@
 """Versorgungskette des Simulationskerns (Bauplan, Schritte 2 bis 5).
 
-Die Planung (Schritt 6) gibt es noch nicht. Die Tests binden Chargen deshalb von Hand, so wie es
-die Planung später tut: Box aus dem Regal nehmen und reservieren, Bestand abziehen, Charge bilden.
+Diese Tests isolieren die Versorgung und binden Chargen von Hand: Box aus dem Regal nehmen,
+reservieren, Bestand abziehen und Charge bilden. Die echte Bindung prüft test_simulation_planung.
 Erwartete Zeiten mit Festwerten: Vorlauf 264 s, Pick 23 s je Teil, Quellboxwechsel 62 s,
 Fahrauftrag 96 s, Rückfahrt der leeren Box 96 s. Die Montage (Schritt 7) ersetzt
 ``montage_leert_box_bei``.
@@ -108,9 +108,11 @@ def zeitpunkte(sim, ereignis, **felder):
 WARTEN = (Ereignistyp.WARTEN_BEGINN, Ereignistyp.WARTEN_ENDE)
 
 
-def ohne_warten(sim):
-    """Protokollzeilen ohne Wartezeiten (die prüfen die Tests zu Schritt 5)."""
-    return [zeile for zeile in sim.protokoll.ereignisse if zeile.ereignis not in WARTEN]
+def versorgungszeilen(sim):
+    """Die Prozesstrace ohne separat geprüfte Warteintervalle und Planungsaufrufe."""
+    return [
+        z for z in sim.protokoll.ereignisse if z.ereignis not in (*WARTEN, Ereignistyp.PLANUNG_AUFRUF)
+    ]
 
 
 def wartezeiten(sim, anforderung_id):
@@ -221,7 +223,7 @@ def test_belegung_des_platzes_steht_im_protokoll(sim):
     sim.env.process(sim.kommissionierung(charge, box))
     sim.env.run()
 
-    assert [zeile.ereignis for zeile in ohne_warten(sim)] == [
+    assert [zeile.ereignis for zeile in versorgungszeilen(sim)] == [
         Ereignistyp.RESERVIERT,
         Ereignistyp.KOMMISSIONIERUNG_BEGINN,
         Ereignistyp.TEIL_GEPICKT,
@@ -229,8 +231,8 @@ def test_belegung_des_platzes_steht_im_protokoll(sim):
         Ereignistyp.KOMMISSIONIERUNG_ENDE,
         Ereignistyp.RESERVIERUNG_AUFGELOEST,
     ]
-    assert all(zeile.charge_id == "C001" for zeile in ohne_warten(sim))
-    assert all(zeile.box_id == str(box.id) for zeile in ohne_warten(sim))
+    assert all(zeile.charge_id == "C001" for zeile in versorgungszeilen(sim))
+    assert all(zeile.box_id == str(box.id) for zeile in versorgungszeilen(sim))
     belegung = zeilen(sim, Ereignistyp.RESERVIERT) + zeilen(
         sim, Ereignistyp.RESERVIERUNG_AUFGELOEST
     )
@@ -345,7 +347,7 @@ def test_hintransport_steht_vollstaendig_im_protokoll(sim):
     sim.env.run()
 
     # Die ersten sechs Zeilen gehören zur Kommissionierung (Schritt 2).
-    assert [(z.zeit_s, z.ereignis, z.ressource) for z in ohne_warten(sim)[6:]] == [
+    assert [(z.zeit_s, z.ereignis, z.ressource) for z in versorgungszeilen(sim)[6:]] == [
         (372.0, Ereignistyp.RESERVIERT, "RASS1.platz_1"),
         (372.0, Ereignistyp.RESERVIERT, "fahrzeug_1"),
         (372.0, Ereignistyp.TRANSPORT_BEGINN, "fahrzeug_1"),
@@ -361,8 +363,8 @@ def test_hintransport_steht_vollstaendig_im_protokoll(sim):
     )
     lieferung = zeilen(sim, Ereignistyp.LIEFERUNG)[0]
     assert (lieferung.zustand_alt, lieferung.zustand_neu) == ("unterwegs", "an_station")
-    assert all(z.charge_id == "C001" for z in ohne_warten(sim))
-    assert all(z.box_id == str(box.id) for z in ohne_warten(sim))
+    assert all(z.charge_id == "C001" for z in versorgungszeilen(sim))
+    assert all(z.box_id == str(box.id) for z in versorgungszeilen(sim))
 
 
 def test_freies_fahrzeug_wird_als_anlass_gemeldet(sim):
@@ -511,7 +513,7 @@ def test_rueckfuehrung_steht_vollstaendig_im_protokoll(sim):
     sim.env.run()
 
     # fahrzeug_1 hat die Box gebracht; am längsten frei ist jetzt fahrzeug_2 (A-13).
-    rueckfuehrung = [z for z in sim.protokoll.ereignisse if z.zeit_s >= 600]
+    rueckfuehrung = [z for z in versorgungszeilen(sim) if z.zeit_s >= 600]
     assert [(z.zeit_s, z.ereignis, z.ressource) for z in rueckfuehrung] == [
         (600.0, Ereignistyp.RESERVIERT, "fahrzeug_2"),
         (600.0, Ereignistyp.LEERBOX_RUECK_BEGINN, "fahrzeug_2"),
