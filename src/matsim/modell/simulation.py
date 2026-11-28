@@ -9,6 +9,8 @@ aus.
 Die Simulation verarbeitet die Entscheidungen eines Planungsverfahrens mit begrenzten
 Ressourcen. Sie übernimmt keine geplanten Fertigstellungen als Ergebnis und ruft das
 Verfahren nur zu den drei festgelegten Planungsanlässen auf.
+
+Ergänzung zu Schritt 6: Planung, Fristen und Chargenbindung sind implementiert.
 """
 
 from __future__ import annotations
@@ -30,6 +32,10 @@ from matsim.kennzahlen.ereignisprotokoll import (
 from matsim.modell.anlage import AnlagenFehler, mit_abweichungen, wert
 from matsim.modell.typen import Box, Boxplatz, BoxZustand, Charge, Produktauftrag
 from matsim.regeln.basis import Anlass, Planungsanlass, Planungsverfahren, Planungszustand
+from matsim.regeln.verfahren import CHARGEN_IN_VERSORGUNG
+
+from . import typen
+from .planung import Planungsfehler, bereite_chargen_vor, endliche_zeit, lesekopie
 
 # --- Reihenfolge gleichzeitiger Ereignisse (docs/projekt/logikstruktur.md, Abschnitt 3) ---------
 # SimPy arbeitet Ereignisse derselben Zeit nach Priorität ab, kleinere zuerst. Es selbst nutzt
@@ -157,7 +163,11 @@ class Simulation:
         self.warteursache: dict[str, Warteursache] = {}
         self._warten_im_protokoll: dict[str, Warteursache] = {}  # Stand laut Protokoll
         self._abzugleichen: dict[str, None] = {}  # in diesem Zeitpunkt geändert, in Reihenfolge
-        #: Gemeldete Planungsanlässe; ab Schritt 6 löst der erste je Zeitpunkt die Planung aus.
+        self._bedarf_je_zeit: dict[float, list[typen.Anforderung]] = {}
+        self._verarbeitete_anlaesse = 0
+        self._letzte_planung_s: float | None = None
+        self._frist: Termin | None = None
+        #: Historie; alle noch nicht verarbeiteten Meldungen bilden den nächsten Sammelaufruf.
         self.anlaesse: list[Anlass] = []
         self.werkstuecke: dict = {}  # Werkstücke mit Fortschritt (Schritt 7)
 
@@ -229,21 +239,127 @@ class Simulation:
 
     # --- Planung (Bauplan, Abschnitt 6; Issue #27) ---------------------------------------------
 
-    def melde_anlass(self, art: Planungsanlass, detail: str = "") -> None:
-        """Merkt einen Planungsanlass vor; geplant wird je Zeitpunkt einmal, zuletzt.
+    def melde_bedarf(self, anforderung: typen.Anforderung) -> None:
+        """Plant den Eingang einer Anforderung ein. Vor ihrem Eingang bleibt sie unsichtbar."""
+        if not endliche_zeit(anforderung.eingang_s) or anforderung.eingang_s < self.env.now:
+            raise SimulationsFehler(f"{anforderung.id}: ungültiger Bedarfseingang")
 
-        Bis Schritt 6 werden die Anlässe nur gesammelt. Den Planungsaufruf dazu ergänzt
-        Schritt 6 (#27).
-        """
-        self.anlaesse.append(Anlass(art, self.env.now, detail))
+        zeit = anforderung.eingang_s
+        if zeit not in self._bedarf_je_zeit:
+            self._bedarf_je_zeit[zeit] = []
+            Termin(self.env, zeit - self.env.now, BEDARF).callbacks.append(self._erfasse_bedarf)
+        self._bedarf_je_zeit[zeit].append(anforderung)
+
+    def _erfasse_bedarf(self, _ereignis: Event) -> None:
+        for anforderung in sorted(self._bedarf_je_zeit.pop(self.env.now), key=lambda a: a.id):
+            if anforderung.id in self.anforderungen:
+                raise SimulationsFehler(f"Anforderung {anforderung.id} bereits erfasst")
+            satz = anforderung.satz
+            if (
+                satz.anforderung_id != anforderung.id or satz.station != anforderung.station
+                or satz.komponenten != self.materialsatz.get(anforderung.station)
+            ):
+                raise SimulationsFehler(f"{anforderung.id}: unpassender Materialsatz")
+            self.anforderungen[anforderung.id] = self.offene[anforderung.id] = anforderung
+            ids = {"anforderung_id": anforderung.id, "ressource": anforderung.station}
+            self.protokolliere(Ereignistyp.BEDARF_EINGANG, **ids)
+            self.protokolliere(Ereignistyp.SATZ_GEBILDET, **ids)
+            self.melde_anlass(Planungsanlass.BEDARFSEINGANG, anforderung.id)
+
+    def melde_anlass(self, art: Planungsanlass, detail: str = "") -> None:
+        """Plant beim ersten Anlass einen Aufruf nach allen fachlichen Ereignissen dieser Zeit."""
+        self.anlaesse.append(Anlass(Planungsanlass(art), self.env.now, detail))
+        if self._letzte_planung_s == self.env.now and not self.offene and art == Planungsanlass.KAPAZITAET_FREI:
+            # Eine nachgelagerte Nullzeit-Freigabe ohne Restbedarf ändert keine Entscheidung.
+            self._verarbeitete_anlaesse = len(self.anlaesse)
+        elif len(self.anlaesse) == self._verarbeitete_anlaesse + 1:
+            self.env.process(self.plane())
 
     def planungszustand(self) -> Planungszustand:
         """Momentaufnahme für das Planungsverfahren (nur der jetzt bekannte Zustand)."""
-        raise NotImplementedError("AP3 Schritt 6 (#27): Planungszustand bilden")
+        return Planungszustand(
+            zeit_s=self.env.now,
+            offene_anforderungen=tuple(sorted(self.offene.values(), key=lambda a: (a.eingang_s, a.id))),
+            freier_bestand=lesekopie(self.freier_bestand),
+            freie_boxen=len(self.boxen.items),
+            freie_kommissionierplaetze=int(self.kommissionierplatz.capacity) - self.kommissionierplatz.count,
+            freie_fahrzeuge=len(self.fahrzeuge.items),
+            freie_uebergabeplaetze=lesekopie({s: len(p.items) for s, p in self.uebergabeplaetze.items()}),
+            box_positionen=self.box_positionen,
+            zulaessige_teile=lesekopie(self.zulaessige_teile),
+            zusatz=lesekopie({CHARGEN_IN_VERSORGUNG: self.chargen_in_versorgung}),
+        )
 
     def plane(self):
         """Prozess: ruft das Verfahren auf, prüft die Entscheidungen und bindet die Chargen."""
-        raise NotImplementedError("AP3 Schritt 6 (#27): Planungsaufruf und Bindung")
+        yield Termin(self.env, 0, PLANUNG)
+        meldungen = self.anlaesse[self._verarbeitete_anlaesse:]
+        if not meldungen:
+            raise SimulationsFehler("Planungsaufruf ohne neuen Planungsanlass")
+        self._verarbeitete_anlaesse = len(self.anlaesse)
+        self._letzte_planung_s = self.env.now
+        rang = {Planungsanlass.BEDARFSEINGANG: BEDARF, Planungsanlass.WARTEFRIST_ABGELAUFEN: FRIST,
+                Planungsanlass.KAPAZITAET_FREI: PLANUNG}
+        fuehrend = min(meldungen, key=lambda a: rang[a.art])
+        detail = "; ".join(f"{a.art}: {a.detail}" for a in meldungen)
+        anlass = Anlass(fuehrend.art, self.env.now, detail)
+        zustand = self.planungszustand()
+        entscheidungen = self.verfahren.entscheide(zustand, anlass)
+        try:
+            chargen = bereite_chargen_vor(
+                entscheidungen, zustand, self.boxen.items, self.anlage, len(self.chargen) + 1
+            )
+        except Planungsfehler as fehler:
+            self.protokolliere(Ereignistyp.PLANUNG_AUFRUF, bemerkung=f"{detail}; abgelehnt: {fehler}")
+            raise
+
+        self.protokolliere(Ereignistyp.PLANUNG_AUFRUF, bemerkung=detail, menge=len(chargen))
+        # Kein yield zwischen Prüfung und letzter Bindung: Die Versorgung sieht nur den Endstand.
+        for charge in chargen:
+            self._binde_charge(charge)
+        for a in self.offene.values():
+            if any(self.freier_bestand.get(p, 0) < m for p, m in a.satz.komponenten):
+                ursache = Warteursache.BESTAND
+            elif not self.boxen.items:
+                ursache = Warteursache.BOX
+            else:
+                ursache = Warteursache.BUENDELUNG
+            self.setze_warteursache([a.id], ursache)
+        self._merke_frist(self.verfahren.naechste_wartefrist(self.planungszustand()))
+
+    def _binde_charge(self, charge: Charge) -> None:
+        box = self.boxen.items.pop(0)
+        box.zustand = BoxZustand.IN_KOMMISSIONIERUNG
+        self.chargen[charge.id] = charge
+        self.chargen_in_versorgung += 1
+        ids = {"charge_id": charge.id, "box_id": str(box.id)}
+        self.protokolliere(Ereignistyp.RESERVIERT, ressource=BOX, zustand_alt=BoxZustand.FREI,
+                           zustand_neu=box.zustand, **ids)
+        for satz in charge.saetze:
+            del self.offene[satz.anforderung_id]
+            self.protokolliere(Ereignistyp.CHARGE_GEBUNDEN, anforderung_id=satz.anforderung_id,
+                               ressource=charge.station, **ids)
+            for pno, menge in satz.komponenten:
+                self.freier_bestand[pno] -= menge
+                self.protokolliere(Ereignistyp.RESERVIERT, anforderung_id=satz.anforderung_id,
+                                   ressource="lager", pno=pno, menge=menge, **ids)
+        self.setze_warteursache((s.anforderung_id for s in charge.saetze), None)
+        self.env.process(self.versorgung(charge, box))
+
+    def _merke_frist(self, zeit_s: float | None) -> None:
+        if zeit_s is None:
+            self._frist = None
+            return
+        if not endliche_zeit(zeit_s) or zeit_s <= self.env.now:
+            raise Planungsfehler(f"Wartefrist {zeit_s!r} muss endlich und nach {self.env.now} s liegen")
+        self._frist = Termin(self.env, zeit_s - self.env.now, FRIST)
+        self._frist.callbacks.append(self._frist_abgelaufen)
+
+    def _frist_abgelaufen(self, ereignis: Event) -> None:
+        # Eine inzwischen ersetzte oder gestrichene Frist löst keinen Planungsaufruf aus.
+        if ereignis is self._frist:
+            self._frist = None
+            self.melde_anlass(Planungsanlass.WARTEFRIST_ABGELAUFEN, str(self.env.now))
 
     # --- Prozesse (Bauplan, Abschnitte 5, 7 und 8) ---------------------------------------------
 

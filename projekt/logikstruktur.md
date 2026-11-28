@@ -166,6 +166,16 @@ Vereinbarte Schlüssel in `zusatz`:
 
 Zu `chargen_in_versorgung`: Die Lieferung verringert den Wert. Der Planungsaufruf, der auf die Lieferung folgt, muss den bereits verringerten Wert sehen. Ausgelöst wird er durch die Freigabe des Fahrzeugs nach der Lieferung (Anlass „Kapazität frei“). Das folgt aus der Regel für gleichzeitige Ereignisse (Planungsaufrufe zuletzt). Ohne diesen Aufruf bliebe Restbedarf unter V0 liegen, weil V0 keine Wartefrist anmeldet. Die Konstante steht als `CHARGEN_IN_VERSORGUNG` in `matsim.regeln.verfahren`.
 
+### Ablauf eines Planungsaufrufs (#27)
+
+1. `melde_bedarf(anforderung)` erfasst einen vollständigen Bedarf erst zu seiner Eingangszeit. Die Simulation sammelt Bedarfseingänge, gültige Fristabläufe und Kapazitätsfreigaben desselben Zeitpunkts. Geplant wird im Rang `PLANUNG`, nach den fachlichen Ereignissen. Der führende Anlass ist Bedarf vor Frist vor Freigabe; alle Einzelmeldungen bleiben im Detail sichtbar.
+2. Der Planer erhält eine getrennte Momentaufnahme mit offenen Anforderungen in Eingangs- und Kennungsfolge. Bestand und Ressourcenangaben sind schreibgeschützte Kopien. Geplante, aber noch nicht eingegangene Anforderungen und die Ereignisliste bleiben unsichtbar. Neben `chargen_in_versorgung` gibt es keine vereinbarte Vorschau (#11).
+3. Die Simulation prüft **die gesamte Antwort**, bevor sie etwas bindet: jede offene Kennung höchstens einmal, Station und vollständiger Satz passend, Boxzahl, Kapazität und Beladungsregeln eingehalten, gemeinsamer Bestand ausreichend und Versandzeit nicht in der Vergangenheit. Bei einem Fehler endet der Lauf mit `Planungsfehler`. Es gibt eine abgelehnte Aufrufzeile, aber keine Bindung, Bestandsentnahme oder gestartete Versorgung aus dieser Antwort.
+4. Bei Erfolg schreibt sie `planung_aufruf` mit der Chargenzahl, reserviert pro Charge eine konkrete freie Box und je Satz den Bestand mit Teilenummer und Menge. `charge_gebunden` verbindet Anforderung, Charge und Box. Erst die Ausführung belegt Kommissionierplatz, Fahrzeug und Übergabeplatz. Eine gebundene Anforderung wird nicht erneut angeboten.
+5. Über die nächste **absolute** Frist entscheidet das Verfahren mit dem Zustand **nach** der Bindung. `None` löscht eine alte Frist; nur der aktuell vorgemerkte Termin darf neu planen. Unendliche oder nicht echt zukünftige Fristen werden als Fehler gemeldet. Eine verspätete Lieferung ist kein vierter Anlass: Ihr Fahrzeug wird frei.
+
+Nachweis: [Planungstests](../tests/test_simulation_planung.py). Sie prüfen unter anderem V1 bei belegtem Kommissionierplatz, unveränderte Bestände nach ungültiger zweiter Entscheidung, die V2-Restfrist ohne neuen Bedarf und den V0-Aufruf nach Lieferung.
+
 ## 5. Verifikation und Validierung
 
 Die Lehrunterlagen grenzen Simulation als eigenes Modul ab ([Kapitel 00](../00-uebersicht-und-modulzuschnitt.md), Abschnitt „Abgrenzung zu anderen Modulen“). Deshalb wird das Vorgehen hier festgelegt; Quellen dazu stehen in [literatur-ergaenzung.md](literatur-ergaenzung.md).
