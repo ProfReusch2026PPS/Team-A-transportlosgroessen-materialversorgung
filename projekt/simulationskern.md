@@ -1,6 +1,6 @@
 # Simulationskern: Bauplan
 
-Verantwortlich: AP3. Laurens Rüther: Grundgerüst, Versorgungskette, Durchstich und V0-Validierung; Mehmet Örücü: Planung (#27) und Montage (#28); Review gegenseitig. Stand: 25.11.2026, Schritte 1 bis 5 von 9 umgesetzt.
+Verantwortlich: AP3. Laurens Rüther: Grundgerüst, Versorgungskette, Durchstich und V0-Validierung; Mehmet Örücü: Planung (#27) und Montage (#28); Review gegenseitig. Stand: 28.11.2026, Schritte 1 bis 5 und 7 von 9 umgesetzt.
 
 Dieser Bauplan beschreibt, wie der Simulationskern in `src/matsim/modell/simulation.py` aufgebaut ist und in welchen Schritten er entsteht. Er ergänzt die [Logikstruktur](logikstruktur.md), die [Kennzahlen](kennzahlen.md) und die [Planungsverfahren](planungsverfahren.md). Zahlen mit dem Vermerk „Prototyp“ stammen aus einem Wegwerf-Prototyp, mit dem der Plan vor der Umsetzung geprüft wurde; er liegt nicht im Repo. Maßgeblich sind die Zahlen der Tests.
 
@@ -14,11 +14,11 @@ Dieser Bauplan beschreibt, wie der Simulationskern in `src/matsim/modell/simulat
 | 4 | Leerboxrückführung | #38 | erledigt (`bc69863`) |
 | 5 | Warteursachen der Versorgungskette | #38 | erledigt |
 | 6 | Planungsaufruf und Bindung | #27 | offen |
-| 7 | Werkstückumlauf und Montage | #28 | offen |
+| 7 | Werkstückumlauf und Montage | #28 | umgesetzt und mit Handfällen geprüft; Anlagenregeln unter Vorbehalt (#18) |
 | 8 | Durchstich (M2) | folgt | offen |
 | 9 | V0 gegen den 09.11.2026 (M3) | folgt | offen |
 
-Jeder Schritt ist ein eigener Commit auf dem Branch `ap3/durchstich`; die Commit-Nachricht nennt Schritt und Issue.
+Die Schritte 1 bis 5 liegen bereits auf `main`; Schritt 7 schließt an ihre Übergabepunkte für gelieferte und geleerte Boxen an.
 
 ## 1 Ziel und Rahmen
 
@@ -45,7 +45,7 @@ Der Simulationskern ist die Klasse `Simulation` in `src/matsim/modell/simulation
 | Grundgerüst: Zustand, Ressourcen, Zeiten | Laurens | #38 | erledigt |
 | Versorgungskette: Kommissionierung bis Leerboxrückführung | Laurens | #38 | erledigt |
 | Planungsaufruf, Chargenbindung, Wartefristen, Ereignisreihenfolge | Mehmet | #27 | offen |
-| Werkstückumlauf und Montage | Mehmet | #28 | offen |
+| Werkstückumlauf und Montage | Mehmet | #28 | implementiert (Abschnitt 8) |
 | Review der AP3-PRs | gegenseitig: Mehmet die von Laurens, Laurens die von Mehmet | – | – |
 | Verfahren V0 bis V4 | Luis (AP4) | #7 bis #10, #12 | V0 bis V3 fertig, V4 offen |
 | Bedarfsverläufe, Prüfregeln, Kennzahlen | AP5 (Team) | – | Gerüst |
@@ -97,8 +97,8 @@ class Simulation:
     def kommissionierung(self, charge, box): ...            # Schritt 2
     def hintransport(self, charge, box): ...                # Schritt 3, endet mit der Lieferung
     def leerboxrueckfuehrung(self, box, platz): ...         # Schritt 4
-    def werkstueckumlauf(self, werkstueck): ...             # #28, Schritt 7
-    def montage(self, station, werkstueck, box, platz): ... # #28, Schritt 7
+    def werkstueckumlauf(self, auftrag, *, zufahrt_s): ... # #28, Schritt 7
+    def montage(self, bedarf, werkstueck, box, platz): ...  # #28, Schritt 7
 
     def laufe(self) -> Ereignisprotokoll: ...               # Schritt 8
 ```
@@ -329,12 +329,14 @@ Folge für `kennzahlen.md`: K2 enthält dann kein Warten vor vollem Zielpuffer. 
 
 Jedes Produkt ist ein Werkstück, das RASS1, RASS2 und RASS3 der Reihe nach anfährt. Montiert wird nur, wenn bei seiner Ankunft der vollständige Satz seiner Anforderung in einer Box auf einem Übergabeplatz der Station liegt. Sonst fährt es eine Runde weiter und kommt wieder.
 
-**Ablauf des Prozesses `werkstueckumlauf(werkstueck)`:**
+**Aufruf:** Der Bedarfseingang legt die drei Anforderungen in `sim.anforderungen` an (Abschnitt 5) und startet `sim.env.process(sim.werkstueckumlauf(auftrag, zufahrt_s=...))`. `auftrag` ist der `Produktauftrag` aus dem Verlauf. `zufahrt_s` ist die reine Fahrt vom Ende der Auslagerung bis RASS1. Solange AP1 keinen Anlagenwert geliefert hat, muss der Aufrufer sie vorgeben (im Handtest synthetisch); es gibt keinen Standardwert. Der Prozess hält das Werkstück unter `W001` usw. in `sim.werkstuecke`; `abgeschlossene_stationen` zählt nur beendete Montagen.
+
+**Ablauf:**
 
 1. Bei `freigabe_s` auslagern (16 s), dann Zufahrt bis RASS1.
 2. An jeder Station: Ankunft (Rang „Werkstückankunft“), Protokoll `werkstueck_ankunft`.
 3. Alle Boxen in `box_an_platz` dieser Station mit `satz_vollstaendig_in_box` prüfen.
-4. **Satz da:** Station anfordern. Ist sie belegt, wartet das Werkstück davor; die Reihenfolge folgt der Montagepriorität (PlannedStart, Auftrag, Position). Dann Montage (unten).
+4. **Satz da:** Station anfordern. Ist sie belegt, wartet das Werkstück davor. Unter den Wartenden entscheidet der geplante Stationsbeginn, dann Auftrag und Position. Als Modellwert für `PlannedStart` dient der Bedarfszeitpunkt dieser Station (A-15). Eine laufende Montage wird nicht unterbrochen.
 5. **Satz fehlt:** `weiterfahrt_materialmangel`, eine Umlaufzeit (140 s) warten, zurück zu Punkt 2. Es entsteht kein wartendes Werkstück vor der Station.
 6. Nach der Montage zur nächsten Station; nach RASS3 verlässt das Werkstück das Modell (Modellgrenze).
 
@@ -354,7 +356,7 @@ Jedes Produkt ist ein Werkstück, das RASS1, RASS2 und RASS3 der Reihe nach anf�
 
 `werkstueckumlauf.wiederkehrregel` ist in `anlage.yaml` offen, und `wert()` löst bei offenen Werten einen Fehler aus. Bis #18 geklärt ist, nutzt der Kern deshalb A-01 mit `umlaufzeit_s`, ausdrücklich als Annahme. Tests dürfen eigene Zeiten setzen (#28 erlaubt synthetische Regeln für Tests).
 
-**Prüffälle aus #28:** Ankunft bei 10 s, Wiederkehr nach 20 s, Lieferung bei 11 s: Montage frühestens bei 30 s, nicht bei 11 s. Kommen Lieferung und Werkstück in derselben Sekunde, wird sofort montiert (Lieferungen vor Ankünften, Abschnitt 9).
+**Nachweis:** In [test_simulation_montage.py](../tests/test_simulation_montage.py) fährt dasselbe Werkstück in drei Läufen bei 10 s an RASS1 an. Die Lieferung durch den Hintransport erfolgt bei 9, 10 oder 11 s: Montagebeginn bei 10, 10 bzw. 30 s. Die 20 s Wiederkehrzeit sind nur ein Testwert. Ein vollständiger Lauf durch alle drei Stationen prüft Teilefolge, Belegung und Leerboxrückgabe. Weitere Fälle prüfen getrennte, fremde und unzulässige Inhalte sowie konkurrierende Werkstücke. Ausführen: `python -m pytest -q tests/test_simulation_montage.py`.
 
 **Was die Validierung zeigen wird:** Am 09.11.2026 begann die erste Montage 9, 33 und 58 s nach Ankunft der Box. Im Modell wartet ein kreisendes Werkstück bis zu 140 s auf die nächste Vorbeifahrt; im Prototyp waren es 72, 88 und 7 s.
 

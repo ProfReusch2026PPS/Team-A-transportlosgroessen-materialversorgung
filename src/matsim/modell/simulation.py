@@ -1,10 +1,7 @@
 """SimPy-Modell der Materialversorgung (AP3).
 
-Stand: Bauplan, Schritt 5. Fertig sind das Grundgerüst (Ressourcen, Zustand, Zeiten,
-Reihenfolge gleichzeitiger Ereignisse, Protokollhilfe) und die Versorgungskette: Kommissionierung,
-Hintransport bis zur Lieferung, Leerboxrückführung und die Warteursachen der Sätze auf diesem Weg.
-Die übrigen Prozesse folgen in den Schritten 6 bis 8 und lösen bis dahin ``NotImplementedError``
-aus.
+Grundgerüst, Versorgungskette sowie Werkstückumlauf und Montage sind umgesetzt.
+Planung (Schritt 6), Bedarfseingang und Laufsteuerung (Schritt 8) sind noch offen.
 
 Die Simulation verarbeitet die Entscheidungen eines Planungsverfahrens mit begrenzten
 Ressourcen. Sie übernimmt keine geplanten Fertigstellungen als Ergebnis und ruft das
@@ -14,11 +11,13 @@ Verfahren nur zu den drei festgelegten Planungsanlässen auf.
 from __future__ import annotations
 
 import random
-from collections.abc import Iterable, Sequence
+from collections.abc import Generator, Iterable, Sequence
+from math import isfinite
 from typing import Any
 
 import simpy
 from simpy.events import Event
+from simpy.resources.resource import Request
 
 from matsim.daten.zeiten import Zeitverteilung, lade_verteilungen
 from matsim.kennzahlen.ereignisprotokoll import (
@@ -27,8 +26,22 @@ from matsim.kennzahlen.ereignisprotokoll import (
     Ereignistyp,
     Warteursache,
 )
+from matsim.kennzahlen.pruefung import satz_vollstaendig_in_box
 from matsim.modell.anlage import AnlagenFehler, mit_abweichungen, wert
-from matsim.modell.typen import Box, Boxplatz, BoxZustand, Charge, Produktauftrag
+from matsim.modell.typen import (
+    Anforderung,
+    Box,
+    Boxplatz,
+    BoxZustand,
+    Charge,
+    Produktauftrag,
+    Werkstueck,
+)
+from matsim.referenz.regeln import (
+    auftragsfreigabe,
+    montageprioritaet,
+    weiterfahrt_bei_materialmangel,
+)
 from matsim.regeln.basis import Anlass, Planungsanlass, Planungsverfahren, Planungszustand
 
 # --- Reihenfolge gleichzeitiger Ereignisse (docs/projekt/logikstruktur.md, Abschnitt 3) ---------
@@ -47,6 +60,7 @@ ABGLEICH = 10  # Warteursachen ins Protokoll, nach allem anderen (Bauplan, Absch
 KOMMISSIONIERPLATZ = "kommissionierplatz"
 #: Ressource einer Transportbox im Protokoll; welche Box es ist, steht im Feld ``box_id``.
 BOX = "box"
+MONTAGEFOLGE = ("RASS1", "RASS2", "RASS3")  # Arbeitsplan WPNo 1000, nicht die YAML-Reihenfolge
 
 _NR_ZUSCHLAG = 1e-6  # je laufender Nummer; bei gleichem Rang kommt die kleinere Nummer zuerst
 _NR_GRENZE = 100_000  # darüber würde der Zuschlag in den nächsten Rang reichen
@@ -73,6 +87,14 @@ class Termin(Event):
 
 class SimulationsFehler(RuntimeError):
     """Widerspruch im eigenen Zustand der Simulation. Wird gemeldet, nie stillschweigend repariert."""
+
+
+class _Montageanfrage(Request):
+    """Die PriorityResource sortiert wartende Anfragen nach ihrem Schlüssel (A-15)."""
+
+    def __init__(self, station: simpy.PriorityResource, bedarf: Anforderung) -> None:
+        self.key = montageprioritaet(bedarf)
+        super().__init__(station)
 
 
 class Simulation:
@@ -148,7 +170,7 @@ class Simulation:
             pno: wert(self.anlage, f"materiallager.anfangsbestand.{pno}")
             for pno in self.anlage["materiallager"]["anfangsbestand"]
         }
-        self.anforderungen: dict = {}  # alle Anforderungen des Laufs, Schlüssel ist die Kennung
+        self.anforderungen: dict[str, Anforderung] = {}
         self.offene: dict = {}  # noch keiner Charge zugeordnet; nur diese sieht das Verfahren
         self.chargen: dict = {}  # gebundene Chargen, unveränderlich
         self.box_an_platz: dict[str, Box] = {}  # welche Box auf welchem Übergabeplatz steht
@@ -159,7 +181,7 @@ class Simulation:
         self._abzugleichen: dict[str, None] = {}  # in diesem Zeitpunkt geändert, in Reihenfolge
         #: Gemeldete Planungsanlässe; ab Schritt 6 löst der erste je Zeitpunkt die Planung aus.
         self.anlaesse: list[Anlass] = []
-        self.werkstuecke: dict = {}  # Werkstücke mit Fortschritt (Schritt 7)
+        self.werkstuecke: dict[str, Werkstueck] = {}
 
     def _regal(self, dinge: Iterable[Any]) -> simpy.Store:
         """Ein ``simpy.Store`` mit benannten Einheiten; ``get()`` liefert die vorderste."""
@@ -457,13 +479,123 @@ class Simulation:
         self.melde_anlass(Planungsanlass.KAPAZITAET_FREI, BOX)
         self.melde_anlass(Planungsanlass.KAPAZITAET_FREI, fahrzeug)
 
-    def werkstueckumlauf(self, werkstueck):
-        """Prozess je Werkstück: Ankunft, Montage bei vollständigem Satz, sonst Weiterfahrt."""
-        raise NotImplementedError("AP3 Schritt 7 (#28): Werkstückumlauf")
+    def _box_passt(self, box: Box, bedarf: Anforderung) -> bool:
+        return (
+            box.zustand == BoxZustand.AN_STATION
+            and box.positionen == self.box_positionen
+            and all(
+                1 <= p.position <= box.positionen and p.pno in self.zulaessige_teile[bedarf.station]
+                for p in box.plaetze
+            )
+            and len({p.position for p in box.plaetze}) == len(box.plaetze)
+            and satz_vollstaendig_in_box(bedarf.satz, box.plaetze)
+        )
 
-    def montage(self, station, werkstueck, box, platz):
-        """Montage mit Komponentenverbrauch aus der Box am Übergabeplatz der Station."""
-        raise NotImplementedError("AP3 Schritt 7 (#28): Montage")
+    def _box_am_uebergabeplatz(self, bedarf: Anforderung) -> tuple[str, Box] | None:
+        anzahl = wert(self.anlage, f"stationen.{bedarf.station}.uebergabeplaetze")
+        for nr in range(1, anzahl + 1):
+            platz = f"{bedarf.station}.platz_{nr}"
+            box = self.box_an_platz.get(platz)
+            if box is not None and self._box_passt(box, bedarf):
+                return platz, box
+        return None
+
+    def werkstueckumlauf(
+        self, auftrag: Produktauftrag, *, zufahrt_s: float
+    ) -> Generator[Event, None, None]:
+        """Start durch den Bedarfseingang; die Zufahrt nach dem Auslagern ist noch offen (#20)."""
+        werkstueck = Werkstueck(auftrag)
+        freigabe = auftragsfreigabe(auftrag)
+        if werkstueck.id in self.werkstuecke or freigabe < self.env.now:
+            raise SimulationsFehler(f"{werkstueck.id}: doppelter Start oder verpasste Freigabe")
+        if not isfinite(zufahrt_s) or zufahrt_s < 0:
+            raise ValueError(f"{werkstueck.id}: ungültige Zufahrtszeit {zufahrt_s}")
+        self.werkstuecke[werkstueck.id] = werkstueck
+        yield self.env.timeout(freigabe - self.env.now)
+        fahrt = self.dauer("werkstueckumlauf.auslagern_s") + zufahrt_s
+        schleife = wert(self.anlage, "werkstueckumlauf.schleife")
+
+        for index, station in enumerate(MONTAGEFOLGE):
+            if index:
+                von = wert(self.anlage, f"stationen.{MONTAGEFOLGE[index - 1]}.resource_id")
+                nach = wert(self.anlage, f"stationen.{station}.resource_id")
+                segmente = (schleife.index(nach) - schleife.index(von)) % len(schleife)
+                fahrt = sum(self.dauer("werkstueckumlauf.bandsegment_s") for _ in range(segmente))
+
+            kennung = f"A{auftrag.nr:03d}-{station}"
+            bedarf = self.anforderungen.get(kennung)
+            if (
+                bedarf is None
+                or bedarf.id != kennung
+                or bedarf.auftrag != auftrag.nr
+                or bedarf.station != station
+                or bedarf.satz.station != station
+                or bedarf.satz.anforderung_id != kennung
+                or bedarf.satz.komponenten != self.materialsatz[station]
+            ):
+                raise SimulationsFehler(f"{werkstueck.id}: passende Anforderung {kennung} fehlt")
+            ids = {"werkstueck_id": werkstueck.id, "anforderung_id": kennung, "ressource": station}
+            while True:
+                yield Termin(self.env, fahrt, ANKUNFT, nr=auftrag.nr)
+                self.protokolliere(Ereignistyp.WERKSTUECK_ANKUNFT, **ids)
+                bereit = self._box_am_uebergabeplatz(bedarf)
+                if bereit is not None:
+                    platz, box = bereit
+                    yield from self.montage(bedarf, werkstueck, box, platz)
+                    werkstueck.abgeschlossene_stationen += 1
+                    break
+                self.protokolliere(Ereignistyp.WEITERFAHRT_MATERIALMANGEL, **ids)
+                fahrt = weiterfahrt_bei_materialmangel(
+                    wert(self.anlage, "werkstueckumlauf.weiterfahrt_bei_materialmangel"),
+                    self.dauer("werkstueckumlauf.umlaufzeit_s"),
+                )
+
+    def montage(
+        self, bedarf: Anforderung, werkstueck: Werkstueck, box: Box, platz: str
+    ) -> Generator[Event, None, None]:
+        """Nur von der Werkstückankunft ausgelöst. Die Station bleibt bis Montageende belegt."""
+        station = bedarf.station
+        if (
+            self.werkstuecke.get(werkstueck.id) is not werkstueck
+            or werkstueck.abgeschlossene_stationen >= len(MONTAGEFOLGE)
+            or MONTAGEFOLGE[werkstueck.abgeschlossene_stationen] != station
+            or bedarf.auftrag != werkstueck.produktauftrag.nr
+            or platz.partition(".")[0] != station
+        ):
+            raise SimulationsFehler(f"{werkstueck.id}: unpassender Montageschritt {bedarf.id} an {platz}")
+        ids = {
+            "werkstueck_id": werkstueck.id,
+            "anforderung_id": bedarf.id,
+            "ressource": station,
+            "box_id": str(box.id),
+        }
+        with _Montageanfrage(self.montagestationen[station], bedarf) as anfrage:
+            yield anfrage
+            if self.box_an_platz.get(platz) is not box or not self._box_passt(box, bedarf):
+                raise SimulationsFehler(f"{bedarf.id}: zugeordneter Satz fehlt bei Montagebeginn")
+
+            schritte = [
+                (pno, self.dauer(f"stationen.{station}.montagezeit_s.{pno}"))
+                for pno, menge in bedarf.satz.komponenten
+                for _ in range(menge)
+            ]
+            rest = self.dauer(f"stationen.{station}.belegung_je_werkstueck_s") - sum(
+                dauer for _, dauer in schritte
+            )
+            if rest < 0:
+                raise SimulationsFehler(f"{station}: Montagezeiten überschreiten die Stationsbelegung")
+            self.protokolliere(Ereignistyp.RESERVIERT, **ids)
+            self.protokolliere(Ereignistyp.MONTAGE_BEGINN, **ids)
+            for pno, dauer in schritte:
+                teil = next(p for p in box.plaetze if p.anforderung_id == bedarf.id and p.pno == pno)
+                box.plaetze.remove(teil)
+                self.protokolliere(Ereignistyp.KOMPONENTE_VERBRAUCHT, pno=pno, menge=1, **ids)
+                if not box.plaetze:
+                    self.env.process(self.leerboxrueckfuehrung(box, platz))
+                yield self.env.timeout(dauer)
+            yield Termin(self.env, rest, FREIGABE, nr=werkstueck.produktauftrag.nr)
+            self.protokolliere(Ereignistyp.MONTAGE_ENDE, **ids)
+            self.protokolliere(Ereignistyp.RESERVIERUNG_AUFGELOEST, **ids)
 
     def laufe(self) -> Ereignisprotokoll:
         """Startet die Prozesse und läuft bis zum Endkriterium oder zur maximalen Laufzeit."""
