@@ -115,3 +115,15 @@ class Produktauftrag:
     nr: int
     eingang_s: float
     freigabe_s: float
+
+
+@dataclass
+class Werkstueck:
+    """Ein Produkt durchläuft die Montagefolge; nur beendete Montagen zählen als Fortschritt."""
+
+    produktauftrag: Produktauftrag
+    abgeschlossene_stationen: int = 0
+
+    @property
+    def id(self) -> str:
+        return f"W{self.produktauftrag.nr:03d}"

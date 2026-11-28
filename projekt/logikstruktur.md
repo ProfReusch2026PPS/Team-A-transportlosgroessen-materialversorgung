@@ -1,6 +1,6 @@
 # Logikstruktur
 
-Verantwortlich: AP3 (Pflege), abgestimmt mit AP4 und AP5. Dieses Dokument beschreibt die Architektur der Daten-, Planungs- und Simulationslogik. Das Code-Gerüst in `src/matsim/` bildet sie mit Signaturen ab; Ablauflogik fehlt noch.
+Verantwortlich: AP3 (Pflege), abgestimmt mit AP4 und AP5. Dieses Dokument beschreibt die Architektur der Daten-, Planungs- und Simulationslogik. Versorgungskette, Werkstückumlauf und Montage sind umgesetzt; Planungsanbindung und Laufsteuerung sind noch offen.
 
 ## 1. Schichten
 
@@ -45,6 +45,7 @@ Definiert in `src/matsim/modell/typen.py`.
 | Objekt | Inhalt | Regel |
 |---|---|---|
 | `Anforderung` | Station, Auftrag, Position, Eingang, Bedarfszeitpunkt | erzeugt genau einen `Materialsatz` |
+| `Werkstueck` | Produktauftrag, Identität, Anzahl beendeter Stationsmontagen | durchläuft RASS1 → RASS2 → RASS3; Weiterfahrt bei Materialmangel überspringt keinen Arbeitsschritt |
 | `Materialsatz` | Komponenten mit Stückzahlen | nur vollständig lieferbar; bleibt seiner Anforderung zugeordnet |
 | `Charge` | vollständige Sätze einer Station in genau einer Box, frühester Versandzeitpunkt | nach Bindung nicht mehr umplanbar |
 | `Box` | 8 Positionen, Inhalt je Position | Zustände siehe unten |
@@ -56,7 +57,7 @@ stateDiagram-v2
   frei --> in_kommissionierung: Charge gebunden, Box reserviert
   in_kommissionierung --> unterwegs: letzter Pick beendet, Fahrzeug zugeordnet
   unterwegs --> an_station: Übergabeplatz frei, Lieferung
-  an_station --> leer_zurueck: letztes Teil verbraucht
+  an_station --> leer_zurueck: letztes Teil verbraucht und Fahrzeug übernimmt
   leer_zurueck --> frei: Rückführung beendet
 ```
 
@@ -125,6 +126,10 @@ Gebundene Chargen und beauftragte Transporte werden nicht umgeplant. Sie erschei
 ### Lieferung beeinflusst Montage
 
 Ein Werkstück, das an einer Station ankommt, wird nur montiert, wenn eine Box am Übergabeplatz dieser Station den vollständigen, ihm zugeordneten Satz enthält (MES-Beleg: B-07 in [datenmodell-mes.md](datenmodell-mes.md)). Fehlt der Satz, fährt das Werkstück weiter; das Ereignis `weiterfahrt_materialmangel` ist eine verpasste Bearbeitungsmöglichkeit. Beleg für die Weiterfahrt ist die Aufgabenstellung („Fehlt Material, fährt das Werkstück weiter“, Text zu Team C) zusammen mit der geschlossenen Bandschleife 10→11→12→13→2→…→7→10 in `tbltopology`. Wann das Werkstück wiederkehrt, legt das Referenzpaket fest; bis dahin ist die Regel offen (L-01, L-02 in [annahmen-und-datenluecken.md](annahmen-und-datenluecken.md)). Fehlendes Material erzeugt kein vor der Station wartendes Werkstück.
+
+Der implementierte Produktionsprozess ([Bauplan, Abschnitt 8](simulationskern.md#8-werkstückumlauf-und-montage-28)) verwendet bis #18 die dokumentierten Übergangsregeln: Freigabe aus dem Produktauftrag (A-16), Wiederkehr an derselben Station nach einer Umlaufzeit (A-01/A-10) und Montagepriorität nur unter Werkstücken mit eigenem vollständigem Satz an einer belegten Station (A-15). Eine Lieferung stellt die Box ab; **nur die Werkstückankunft**, nicht die Lieferung, löst die Satzprüfung aus.
+
+Bei Montagebeginn belegt das Werkstück die Station. Jeder Verbrauch entfernt genau eine Boxposition der eigenen Anforderung. Die einzelnen Montagezeiten sind Teil der Stationsbelegung: Bei RASS1 bleiben von 136 s nach 39 s und 28 s Montage noch 69 s Nebenzeit. Mit dem letzten Teil der Box beginnt der getrennte Rückführungsprozess, auch wenn die Station noch arbeitet. Erst nach der Rückfahrt ist die Box wieder frei. Das Ereignisprotokoll hält Werkstück, Anforderung, Station und beim Verbrauch auch Box, Teilenummer und Menge fest.
 
 ### Gleichzeitige Ereignisse
 
